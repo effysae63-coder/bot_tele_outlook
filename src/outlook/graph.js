@@ -1,4 +1,3 @@
-// src/outlook/graph.js
 const axios = require('axios');
 
 class GraphClient {
@@ -9,17 +8,25 @@ class GraphClient {
 
     async request(method, url, data = null) {
         try {
-            const response = await axios({
-                method,
+            const config = {
+                method: method,  // ✅ YEH IMPORTANT HAI!
                 url: `${this.baseUrl}${url}`,
                 headers: {
                     'Authorization': `Bearer ${this.accessToken}`,
                     'Content-Type': 'application/json'
-                },
-                data
-            });
+                }
+            };
+            
+            if (data) {
+                config.data = data;  // ✅ RAW OBJECT, stringify nahi!
+            }
+            
+            const response = await axios(config);
             return response.data;
         } catch (error) {
+            console.error(`❌ Graph API ${method} ${url} error:`, 
+                error.response?.data || error.message
+            );
             throw error;
         }
     }
@@ -35,15 +42,16 @@ class GraphClient {
         }
     }
 
-    async createRule(rule) {
-        try {
-            const response = await this.request('POST', '/me/mailFolders/inbox/messageRules', rule);
-            return response;
-        } catch (error) {
-            console.error('❌ Create rule error:', error.response?.data || error.message);
-            throw error;
-        }
+async createRule(rule) {
+    try {
+        // ✅ Make sure rule is passed as object, NOT stringified
+        const response = await this.request('POST', '/me/mailFolders/inbox/messageRules', rule);
+        return response;
+    } catch (error) {
+        console.error('❌ Create rule error:', error.response?.data || error.message);
+        throw error;
     }
+}
 
     async updateRule(ruleId, rule) {
         try {

@@ -133,6 +133,14 @@ class RuleCommands {
                 const refreshToken = decryptToken(account.refreshToken);
                 const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
                 
+                // Add this after LINE 135
+if (conditions.length === 0) {
+    return this.bot.sendMessage(chatId,
+        '❌ *Error:* At least one condition required.\n' +
+        'Example: `subject:amazon` or `sender:shopify.com`',
+        { parse_mode: 'Markdown' }
+    );
+}
                 if (!tokenResult.success) {
                     return this.bot.sendMessage(chatId, `❌ Failed to connect to account.`);
                 }
@@ -141,7 +149,7 @@ class RuleCommands {
                     displayName: ruleName,
                     sequence: 100,
                     isEnabled: true,
-                    conditions: { or: conditions },
+                    conditions: conditions.length > 0 ? conditions[0] : {},
                     actions: {}
                 };
 

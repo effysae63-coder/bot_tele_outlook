@@ -91,44 +91,42 @@ class OutlookAuth {
         }
     }
 
-    async refreshAccessToken(refreshToken) {
-        try {
-            console.log('🔄 Refreshing access token...');
-            
-            const tokenUrl = `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/token`;
-            
-            const params = new URLSearchParams({
-                client_id: this.clientId,
-                client_secret: this.clientSecret,
-                refresh_token: refreshToken,
-                grant_type: 'refresh_token',
-                scope: this.scopes.join(' ')
-            });
+async refreshAccessToken(refreshToken, force = false) {
+    try {
+        
+        const tokenUrl = `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/token`;
+        
+        const params = new URLSearchParams({
+            client_id: this.clientId,
+            client_secret: this.clientSecret,
+            refresh_token: refreshToken,
+            grant_type: 'refresh_token',
+            scope: this.scopes.join(' ')
+        });
 
-            const response = await axios.post(tokenUrl, params, {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
-            });
+        const response = await axios.post(tokenUrl, params, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+        });
 
-            console.log('✅ Token refreshed successfully');
 
-            return {
-                success: true,
-                accessToken: response.data.access_token,
-                refreshToken: response.data.refresh_token || refreshToken,
-                expiresIn: response.data.expires_in
-            };
-        } catch (error) {
-            console.error('❌ Refresh error:', error.response?.data || error.message);
-            return {
-                success: false,
-                error: error.response?.data?.error_description || error.message,
-                errorCode: error.response?.data?.error,
-                status: error.response?.status
-            };
-        }
+        return {
+            success: true,
+            accessToken: response.data.access_token,
+            refreshToken: response.data.refresh_token || refreshToken,
+            expiresIn: response.data.expires_in
+        };
+    } catch (error) {
+        console.error('❌ Refresh error:', error.response?.data || error.message);
+        return {
+            success: false,
+            error: error.response?.data?.error_description || error.message,
+            errorCode: error.response?.data?.error,
+            status: error.response?.status
+        };
     }
+}
 }
 
 module.exports = OutlookAuth;

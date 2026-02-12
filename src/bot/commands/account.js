@@ -160,7 +160,7 @@ class AccountCommands {
             try {
                 const accounts = await Account.find({ 
                     telegramChatId: chatId.toString() 
-                }).sort({ createdAt: -1 });
+                }).sort({ createdAt: -1 }).lean();
 
                 if (accounts.length === 0) {
                     return this.bot.sendMessage(chatId,
@@ -191,7 +191,7 @@ class AccountCommands {
                     message += `   ├ Rules: ${acc.rules?.length || 0} total\n`;
                     message += `   ├ Blocked: ${acc.blockedSenders?.length || 0}\n`;
                     message += `   ├ Forward: ${acc.forwardRules?.length || 0}\n`;
-                    message += `   ├ Checks: ${acc.stats?.rulesEnforced || 0}\n`;
+                    message += `   ├ Checks: ${acc.ruleStats?.enforceCount || acc.stats?.rulesEnforced || 0}\n`;
                     message += `   └ Last: ${lastCheck}\n\n`;
                 }
 
@@ -221,8 +221,8 @@ class AccountCommands {
                 }
 
                 const accounts = email 
-                    ? [await Account.findOne(query)]
-                    : await Account.find(query).sort({ createdAt: -1 }).limit(5);
+                    ? [await Account.findOne(query).lean()]
+                    : await Account.find(query).sort({ createdAt: -1 }).limit(5).lean();
 
                 if (!accounts || accounts.length === 0 || !accounts[0]) {
                     return this.bot.sendMessage(chatId, '❌ Account not found.');
@@ -239,9 +239,9 @@ class AccountCommands {
                     
                     msg += `📊 *STATUS*\n`;
                     msg += `├ Status: ${acc.status}\n`;
-                    msg += `├ Added: ${acc.createdAt.toLocaleDateString()}\n`;
-                    msg += `├ Last Active: ${acc.lastActive?.toLocaleString() || 'Never'}\n`;
-                    msg += `└ Last Check: ${acc.lastChecked?.toLocaleString() || 'Never'}\n\n`;
+                    msg += `├ Added: ${new Date(acc.createdAt).toLocaleDateString()}\n`;
+                    msg += `├ Last Active: ${acc.lastActive ? new Date(acc.lastActive).toLocaleString() : 'Never'}\n`;
+                    msg += `└ Last Check: ${acc.lastChecked ? new Date(acc.lastChecked).toLocaleString() : 'Never'}\n\n`;
                     
                     msg += `📋 *RULES* (${acc.rules?.length || 0})\n`;
                     const stickyRules = acc.rules?.filter(r => r.isSticky) || [];
@@ -279,7 +279,7 @@ class AccountCommands {
                     
                     msg += `💾 *BACKUP*\n`;
                     msg += `├ Auto Backup: ${acc.autoBackup ? '✅' : '❌'}\n`;
-                    msg += `└ Last Backup: ${acc.lastBackup?.toLocaleString() || 'Never'}\n`;
+                    msg += `└ Last Backup: ${acc.lastBackup ? new Date(acc.lastBackup).toLocaleString() : 'Never'}\n`;
 
                     await this.bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
                 }
@@ -313,7 +313,8 @@ class AccountCommands {
 
                 const logs = await Log.find({ accountId: account._id })
                     .sort({ createdAt: -1 })
-                    .limit(20);
+                    .limit(20)
+                    .lean();
 
                 let msgText = `📋 *ACCOUNT HISTORY - ${account.email}*\n\n`;
 
@@ -345,6 +346,14 @@ class AccountCommands {
                 if (!account) {
                     return this.bot.sendMessage(chatId,
                         `❌ Account \`${email}\` not found`,
+                        { parse_mode: 'Markdown' }
+                    );
+                }
+
+                if (!account.refreshToken) {
+                    return this.bot.sendMessage(chatId,
+                        `⚠️ *Account has no refresh token*\n\n` +
+                        `Please use /add instead of /reconnect.`,
                         { parse_mode: 'Markdown' }
                     );
                 }
@@ -396,6 +405,22 @@ class AccountCommands {
         if (hours < 24) return `${hours}h ago`;
         const days = Math.floor(hours / 24);
         return `${days}d ago`;
+    }
+
+    // ============= HELPER METHODS =============
+    async getAccountStats(accountId) {
+        try {
+            const logs = await Log.countDocuments({ 
+                accountId, 
+                createdAt: { $gte: new Date(Date.now() - 24*60*60*1000) }
+            });
+            
+            const backups = await Backup.countDocuments({ accountId });
+            
+            return { logs, backups };
+        } catch (error) {
+            return { logs: 0, backups: 0 };
+        }
     }
 }
 

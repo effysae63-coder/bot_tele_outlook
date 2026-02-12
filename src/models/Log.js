@@ -1,4 +1,3 @@
-// src/models/Log.js
 const mongoose = require('mongoose');
 
 const LogSchema = new mongoose.Schema({
@@ -19,6 +18,8 @@ const LogSchema = new mongoose.Schema({
             'rule_deleted',
             'rule_toggled',
             'rule_verified',
+            'rule_check_failed',        // ✅ ADD THIS
+            'blocked_senders_state',     // ✅ ADD THIS
             'domain_blocked',
             'domain_unblocked',
             'domain_forward_rule_created',

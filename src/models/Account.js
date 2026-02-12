@@ -14,7 +14,10 @@ const RuleSchema = new mongoose.Schema({
 
 const SenderRuleSchema = new mongoose.Schema({
     sender: String,
-    action: { type: String, enum: ['block', 'forward', 'delete', 'markread'] },
+    action: { 
+    type: String, 
+    enum: ['block', 'forward', 'forward_delete', 'delete', 'markread'] 
+},
     targetEmail: String,
     createdAt: { type: Date, default: Date.now },
     isActive: { type: Boolean, default: true }
@@ -72,7 +75,13 @@ const AccountSchema = new mongoose.Schema({
         emailsForwarded: { type: Number, default: 0 },
         alertsSent: { type: Number, default: 0 }
     },
-    
+    ruleStats: {
+    enforceCount: { type: Number, default: 0 },
+    restoreCount: { type: Number, default: 0 },
+    lastEnforced: Date,
+    lastRestored: Date,
+    lastChecked: Date
+},
     // History (last 50 actions)
     history: [{
         action: String,
@@ -91,7 +100,6 @@ const AccountSchema = new mongoose.Schema({
 });
 
 // Indexes for faster queries
-AccountSchema.index({ email: 1 });
 AccountSchema.index({ status: 1 });
 AccountSchema.index({ telegramChatId: 1 });
 AccountSchema.index({ updatedAt: 1 });
@@ -99,7 +107,6 @@ AccountSchema.index({ updatedAt: 1 });
 // Update timestamps on save
 AccountSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
-    next();
 });
 
 module.exports = mongoose.model('Account', AccountSchema);
