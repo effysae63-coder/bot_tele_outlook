@@ -678,5 +678,630 @@ Outlook logo + Telegram logo merged with lightning bolt
 
 ---
 
-**✅ THANK YOU ** 🚀
+**
+
+
+
+
+
+# 📘 **OUTLOOK BOT - QUICK COMMAND GUIDE FOR CLIENTS**
+
+<p align="center">
+  <img src="https://img.shields.io/badge/🤖_BOT-READY_TO_USE-00C853?style=for-the-badge" alt="Bot Ready">
+  <img src="https://img.shields.io/badge/⚡_RESPONSE-2--5_SECONDS-FF6D00?style=for-the-badge" alt="Response Time">
+</p>
+
+---
+
+# 🎯 **HOW TO USE THIS BOT - SIMPLE STEPS**
+
+## 📌 **BEFORE YOU START**
+- You need a **Telegram account**
+- You need **Outlook/Hotmail/Live accounts** to control
+- That's it! No technical knowledge required ✅
+
+---
+
+# 📧 **1. ACCOUNT COMMANDS**
+
+---
+
+## 🟢 **/add - Add New Outlook Account**
+
+**Step-by-Step:**
+
+| Step | Action | Example |
+|------|--------|---------|
+| **1** | Type `/add` in Telegram | `/add` |
+| **2** | Click the blue login link | [🔐 LOGIN MICROSOFT] |
+| **3** | Login with your Outlook email | `your@outlook.com` |
+| **4** | Click "Accept" for permissions | ✅ Accept |
+| **5** | **Page goes blank** - Copy FULL URL | `http://localhost:3000/auth/callback?code=...` |
+| **6** | Paste URL back in Telegram | Press Send |
+
+✅ **Done! Your account is now connected.**
+
+---
+
+## 📋 **/list - View All Your Accounts**
+
+**Command:**
+```
+/list
+```
+
+**What you see:**
+```
+✅ zahid@outlook.com - Active
+🔄 ali@hotmail.com - Reconnect needed
+✅ sam@live.com - Active
+```
+
+✅ = Working fine  
+🔄 = Need reconnect (use /reconnect)
+
+---
+
+## ℹ️ **/status - Check Account Details**
+
+**Command:**
+```
+/status zahid@outlook.com
+```
+
+**What you see:**
+- Account status (Active/Expired)
+- When it was added
+- Total rules & blocked senders
+- Last backup time
+
+---
+
+## 🔄 **/reconnect - Fix Expired Account**
+
+**When to use:** When you see 🔄 icon in /list
+
+**Command:**
+```
+/reconnect zahid@outlook.com
+```
+
+**Process:** Same as /add - Click link, login, paste URL
+
+✅ **Account fixed in 30 seconds!**
+
+---
+
+## 🗑️ **/remove - Remove Account**
+
+**Command:**
+```
+/remove zahid@outlook.com
+```
+
+⚠️ **Auto-backup created before removal!**  
+You can restore later with `/restore`
+
+**Remove ALL accounts:**
+```
+/remove all
+```
+
+---
+
+# 🚫 **2. BLOCK COMMANDS**
+
+---
+
+## 🔴 **/block - Block Spam Senders**
+
+**Block specific sender:**
+```
+/block spammer@example.com
+```
+✅ All emails from this sender will be **FORWARDED + DELETED**
+
+---
+
+**Block entire domain:**
+```
+/block @ebay.com
+```
+✅ All emails from ANY ebay.com email will be **FORWARDED + DELETED**
+
+---
+
+**Block on specific account only:**
+```
+/block zahid@outlook.com|spam.com
+```
+✅ Only blocks on zahid@outlook.com, other accounts remain
+
+---
+
+**Block on ALL your accounts:**
+```
+/block all:spam.com
+```
+✅ Blocks on EVERY account you own
+
+---
+
+## 🟢 **/unblock - Remove Block**
+
+**Unblock sender:**
+```
+/unblock spammer@example.com
+```
+
+**Unblock domain:**
+```
+/unblock @ebay.com
+```
+
+---
+
+## 📋 **/blocked - View Blocked Senders**
+
+**View all blocked:**
+```
+/blocked
+```
+
+**View blocked for specific account:**
+```
+/blocked zahid@outlook.com
+```
+
+---
+
+## 🔍 **/check - Check Domain Status**
+
+**Command:**
+```
+/check ebay.com
+```
+
+**What you see:**
+```
+📋 Domain Status: ebay.com
+📧 Total Accounts: 3
+🚫 Blocked: 3 accounts
+📨 Forwarded: 3 accounts
+```
+
+---
+
+# 📨 **3. FORWARD COMMANDS**
+
+---
+
+## 📤 **/forward - Forward Emails**
+
+**Forward entire domain:**
+```
+/forward @ebay.com friend@gmail.com
+```
+✅ All eBay emails → friend@gmail.com + DELETE original
+
+---
+
+**Forward specific sender:**
+```
+/forward zahid@outlook.com work@gmail.com
+```
+✅ zahid@outlook.com's emails → work@gmail.com + DELETE original
+
+---
+
+## 🛑 **/forward off - Stop Forwarding**
+
+**Stop ALL forwarding for a sender:**
+```
+/forward off @ebay.com
+```
+✅ All eBay forwarding rules removed
+
+---
+
+**Stop SPECIFIC forward only:**
+```
+/forward off zahid@outlook.com|work@gmail.com
+```
+✅ Only removes forwarding to work@gmail.com  
+✅ Other forwards (if any) still work!
+
+---
+
+# 📋 **4. RULE COMMANDS**
+
+---
+
+## 📜 **/rules - View All Rules**
+
+**Command:**
+```
+/rules zahid@outlook.com
+```
+
+**What you see:**
+```
+1. ✅ Sticky_eBay_Microsoft_Rule 🔒
+   └ Actions: → neg4pos@gmail.com Delete MarkRead Stop
+
+2. ✅ Forward_@ebay.com_to_archive
+   └ Actions: → archive@gmail.com MarkRead
+
+3. ✅ Block_Shopify
+   └ Actions: Delete
+```
+
+🔒 = Sticky rule (cannot be deleted, auto-restores)
+
+---
+
+## ➕ **/rule add - Create Custom Rule**
+
+**Format:**
+```
+/rule add RuleName | email | condition:value | action:value
+```
+
+**Examples:**
+
+| Purpose | Command |
+|---------|---------|
+| **Block Shopify emails** | `/rule add BlockShopify | zahid@outlook.com | sender:shopify.com | action:delete` |
+| **Forward Amazon orders** | `/rule add AmazonForward | zahid@outlook.com | subject:amazon | forward:archive@gmail.com` |
+| **Delete + Forward** | `/rule add GhostMode | zahid@outlook.com | sender:newsletter.com | forward:archive@gmail.com | action:delete` |
+
+**Available Conditions:**
+- `subject:keyword` - Email subject contains keyword
+- `sender:email/domain` - From specific sender/domain
+- `body:keyword` - Email body contains keyword
+
+**Available Actions:**
+- `forward:email` - Forward to email address
+- `action:delete` - Delete email
+- `action:markread` - Mark as read
+- `action:stop` - Stop processing more rules
+
+---
+
+## 🔄 **/rule toggle - Enable/Disable Rule**
+
+**Command:**
+```
+/rule toggle "BlockShopify" zahid@outlook.com
+```
+✅ Rule ON → OFF or OFF → ON
+
+---
+
+## 🗑️ **/rule remove - Delete Rule**
+
+**Command:**
+```
+/rule remove "BlockShopify" zahid@outlook.com
+```
+
+⚠️ **Cannot remove sticky rules** (ones with 🔒 icon)
+
+---
+
+## ♻️ **/rule restore - Restore Deleted Rule**
+
+**Command:**
+```
+/rule restore "BlockShopify" zahid@outlook.com
+```
+✅ Rule restored from database backup
+
+---
+
+## 💾 **/rule backup - Backup All Rules**
+
+**Command:**
+```
+/rule backup zahid@outlook.com
+```
+✅ Saves all current rules to database
+
+---
+
+# 💾 **5. BACKUP & RESTORE COMMANDS**
+
+---
+
+## 📀 **/backup - Create Full Backup**
+
+**Backup one account:**
+```
+/backup zahid@outlook.com
+```
+
+**Backup ALL accounts:**
+```
+/backup all
+```
+
+✅ Saves: Rules + Blocked senders + Forward rules
+
+---
+
+## 📋 **/backups - View All Backups**
+
+**Command:**
+```
+/backups zahid@outlook.com
+```
+
+**What you see:**
+```
+💾 BACKUPS - zahid@outlook.com
+━━━━━━━━━━━━━━━━━━━━━
+📊 Total: 5 backups
+
+1. 💾 backup_1234567890
+   ├ Type: manual
+   ├ Date: Today 2:00 PM
+   ├ Rules: 3
+   └ Blocked: 12
+
+2. 🔄 auto_1234567890
+   ├ Type: auto
+   ├ Date: Yesterday 2:00 AM
+   ├ Rules: 3
+   └ Blocked: 10
+```
+
+---
+
+## ♻️ **/restore - Restore from Backup**
+
+**Command:**
+```
+/restore zahid@outlook.com backup_1234567890
+```
+✅ All rules + blocked senders restored!
+
+---
+
+## 📸 **/snapshot - Quick State Snapshot**
+
+**Command:**
+```
+/snapshot zahid@outlook.com
+```
+✅ Fast backup (saves current state only, not full history)
+
+---
+
+## 🔍 **/compare - Compare Current vs Backup**
+
+**Command:**
+```
+/compare zahid@outlook.com backup_1234567890
+```
+
+**What you see:**
+```
+📊 COMPARISON RESULT
+├ Current Rules: 4
+├ Backup Rules: 3
+├ Missing: 1 rule (Block_Shopify)
+├ Current Blocked: 12
+└ Backup Blocked: 10
+```
+
+---
+
+## ⚙️ **/auto backup - Toggle Auto Backup**
+
+**Enable:**
+```
+/auto backup zahid@outlook.com on
+```
+✅ Daily backups at 2:00 AM
+
+**Disable:**
+```
+/auto backup zahid@outlook.com off
+```
+
+---
+
+## 🗑️ **/delete backup - Delete Old Backup**
+
+**Command:**
+```
+/delete backup zahid@outlook.com backup_1234567890
+```
+⚠️ Permanent deletion!
+
+---
+
+# 📊 **6. REPORTS & STATS COMMANDS**
+
+---
+
+## 📈 **/report daily - Today's Summary**
+
+**Command:**
+```
+/report daily
+```
+
+**What you see:**
+```
+📊 DAILY REPORT - 2/13/2026
+
+📧 Accounts: 3 active / 0 issues
+🛡️ Rules Enforced: 127
+🚫 Senders Blocked: 15
+📨 Emails Forwarded: 89
+❌ Errors: 0
+```
+
+---
+
+## 📆 **/report weekly - Last 7 Days**
+
+**Command:**
+```
+/report weekly
+```
+✅ Shows daily activity graph + weekly totals
+
+---
+
+## 📅 **/report monthly - 30 Days Report**
+
+**Command:**
+```
+/report monthly
+```
+✅ Shows weekly breakdown + monthly analytics
+
+---
+
+## 📧 **/report [email] - Account Specific Report**
+
+**Command:**
+```
+/report zahid@outlook.com
+```
+✅ Complete report for one specific account
+
+---
+
+## 📊 **/summary - Quick Overview**
+
+**Command:**
+```
+/summary
+```
+
+**What you see:**
+```
+📊 QUICK SUMMARY
+📧 Total Accounts: 5
+✅ Active: 4
+🔄 Reconnect: 1
+📋 Total Rules: 12
+🚫 Total Blocked: 45
+📨 Total Forwards: 8
+```
+
+---
+
+## 📉 **/stats - Bot Performance Stats**
+
+**Command:**
+```
+/stats
+```
+
+**What you see:**
+```
+📊 BOT STATISTICS
+🤖 Uptime: 15d 7h 23m
+📧 Accounts: 5
+💾 Backups: 47
+⚡ Response Time: 2-5 sec
+```
+
+---
+
+## 📋 **/logs - Recent Activity**
+
+**View all accounts activity:**
+```
+/logs
+```
+
+**View specific account activity:**
+```
+/logs zahid@outlook.com
+```
+
+---
+
+## 📁 **/export - Export Your Data**
+
+**Export as JSON:**
+```
+/export json
+```
+
+**Export as CSV (Excel):**
+```
+/export csv
+```
+
+**Export as TXT:**
+```
+/export txt
+```
+
+✅ Bot sends you a file with all your account data!
+
+---
+
+# ⚡ **PRO TIPS**
+
+| # | Tip | Command |
+|---|-----|---------|
+| 1 | **Block + Forward = Ghost Mode** | `/block @ebay.com` - Spam hidden + forwarded |
+| 2 | **Stop specific forward only** | `/forward off sender@email.com\|target@email.com` |
+| 3 | **Bulk block on all accounts** | `/block all:spam.com` |
+| 4 | **Never lose data** | Auto backup ON by default |
+| 5 | **Check domain status** | `/check ebay.com` |
+| 6 | **Sticky rules = LOCKED** | Can't delete, auto-restores |
+
+---
+
+# ❓ **QUICK TROUBLESHOOTING**
+
+| Problem | Solution |
+|---------|----------|
+| **❌ "Account not found"** | Check email spelling, use `/list` to see accounts |
+| **❌ "Failed to connect"** | Token expired → `/reconnect email@outlook.com` |
+| **❌ "Cannot remove sticky rule"** | It's protected! Use `/rule toggle` instead |
+| **❌ Forward not working** | Use `/check domain.com` to verify |
+| **⚠️ Reconnect needed** | `/reconnect email@outlook.com` - 30 sec fix |
+| **❌ Daily limit reached** | Max 10 accounts/day, try again tomorrow |
+
+---
+
+# 🎯 **BOT FEATURES - QUICK SUMMARY**
+
+| Feature | Works? | Response Time |
+|---------|--------|---------------|
+| ✅ Add Outlook accounts | ✅ YES | 10 sec |
+| ✅ Block spam senders | ✅ YES | 2 sec |
+| ✅ Auto re-block (if unblocked) | ✅ YES | **2-5 sec** |
+| ✅ Forward emails | ✅ YES | 3 sec |
+| ✅ Forward + Delete (Ghost mode) | ✅ YES | 3 sec |
+| ✅ Sticky rules (eBay/Microsoft) | ✅ YES | Auto-restore in 10 sec |
+| ✅ Custom rules | ✅ YES | 3 sec |
+| ✅ Backup & Restore | ✅ YES | 5 sec |
+| ✅ Daily reports | ✅ YES | 9:00 AM |
+| ✅ 24/7 monitoring | ✅ YES | **2-5 sec** |
+
+---
+
+<p align="center">
+  <b>✅ BOT IS READY TO USE! ✅</b><br>
+  <b>Type /add to connect your first Outlook account</b>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/📨_QUESTIONS-Join_Telegram_Channel-26A5E4?style=for-the-badge" alt="Support">
+  <img src="https://img.shields.io/badge/⭐_LIKE_THIS_BOT-Star_on_GitHub-FFD700?style=for-the-badge" alt="Star">
+</p>
+
+---
+
+**Happy Email Managing!** 🚀
 
