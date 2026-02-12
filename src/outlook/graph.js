@@ -1,0 +1,156 @@
+// src/outlook/graph.js
+const axios = require('axios');
+
+class GraphClient {
+    constructor(accessToken) {
+        this.accessToken = accessToken;
+        this.baseUrl = 'https://graph.microsoft.com/v1.0';
+    }
+
+    async request(method, url, data = null) {
+        try {
+            const response = await axios({
+                method,
+                url: `${this.baseUrl}${url}`,
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                data
+            });
+            return response.data;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    // ============= RULE MANAGEMENT =============
+    async getRules() {
+        try {
+            const response = await this.request('GET', '/me/mailFolders/inbox/messageRules');
+            return response.value || [];
+        } catch (error) {
+            console.error('❌ Get rules error:', error.response?.data || error.message);
+            return [];
+        }
+    }
+
+    async createRule(rule) {
+        try {
+            const response = await this.request('POST', '/me/mailFolders/inbox/messageRules', rule);
+            return response;
+        } catch (error) {
+            console.error('❌ Create rule error:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+
+    async updateRule(ruleId, rule) {
+        try {
+            const response = await this.request('PATCH', `/me/mailFolders/inbox/messageRules/${ruleId}`, rule);
+            return response;
+        } catch (error) {
+            console.error('❌ Update rule error:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+
+    async deleteRule(ruleId) {
+        try {
+            await this.request('DELETE', `/me/mailFolders/inbox/messageRules/${ruleId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Delete rule error:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+
+    // ============= BLOCKED SENDERS =============
+    async getBlockedSenders() {
+        try {
+            const rules = await this.getRules();
+            const blockRule = rules.find(r => 
+                r.displayName === 'Blocked Senders - Sticky' ||
+                r.displayName?.includes('Blocked')
+            );
+            return blockRule?.conditions?.senderContains || [];
+        } catch (error) {
+            console.error('❌ Get blocked senders error:', error.message);
+            return [];
+        }
+    }
+
+    async addBlockedSender(domain) {
+        try {
+            const rules = await this.getRules();
+            let blockRule = rules.find(r => r.displayName === 'Blocked Senders - Sticky');
+
+            if (blockRule) {
+                const current = blockRule.conditions?.senderContains || [];
+                if (!current.includes(domain)) {
+                    current.push(domain);
+                    await this.updateRule(blockRule.id, {
+                        conditions: { senderContains: current }
+                    });
+                }
+            } else {
+                await this.createRule({
+                    displayName: 'Blocked Senders - Sticky',
+                    sequence: 999,
+                    isEnabled: true,
+                    conditions: { senderContains: [domain] },
+                    actions: { delete: true }
+                });
+            }
+            return true;
+        } catch (error) {
+            console.error('❌ Add blocked sender error:', error.message);
+            throw error;
+        }
+    }
+
+    async removeBlockedSender(domain) {
+        try {
+            const rules = await this.getRules();
+            let blockRule = rules.find(r => r.displayName === 'Blocked Senders - Sticky');
+
+            if (blockRule) {
+                const current = blockRule.conditions?.senderContains || [];
+                const updated = current.filter(d => d !== domain);
+                
+                if (updated.length > 0) {
+                    await this.updateRule(blockRule.id, {
+                        conditions: { senderContains: updated }
+                    });
+                } else {
+                    await this.deleteRule(blockRule.id);
+                }
+            }
+            return true;
+        } catch (error) {
+            console.error('❌ Remove blocked sender error:', error.message);
+            throw error;
+        }
+    }
+
+    async isSenderBlocked(domain) {
+        try {
+            const blocked = await this.getBlockedSenders();
+            return blocked.includes(domain);
+        } catch (error) {
+            return false;
+        }
+    }
+
+    // ============= USER INFO =============
+    async getUser() {
+        try {
+            return await this.request('GET', '/me?$select=displayName,mail,userPrincipalName');
+        } catch (error) {
+            console.error('❌ Get user error:', error.message);
+            return null;
+        }
+    }
+}
+
+module.exports = GraphClient;
