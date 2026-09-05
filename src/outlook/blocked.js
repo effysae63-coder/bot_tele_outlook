@@ -5,7 +5,10 @@ const Log = require('../models/Log');
 class BlockedSendersManager {
     constructor() {
         this.BLOCK_RULE_NAME = 'Blocked Senders - Sticky';
-        this.FORWARD_TARGET = process.env.FORWARD_TARGET_EMAIL || 'neg4pos@gmail.com';
+        if (!process.env.FORWARD_TARGET_EMAIL) {
+            console.warn('⚠️ WARNING: FORWARD_TARGET_EMAIL is not defined in .env');
+        }
+        this.FORWARD_TARGET = process.env.FORWARD_TARGET_EMAIL;
     }
 
     async getBlockedSenders(accessToken) {

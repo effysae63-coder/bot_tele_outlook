@@ -107,6 +107,7 @@ AccountSchema.index({ updatedAt: 1 });
 // Update timestamps on save
 AccountSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
+    next();
 });
 
 module.exports = mongoose.model('Account', AccountSchema);

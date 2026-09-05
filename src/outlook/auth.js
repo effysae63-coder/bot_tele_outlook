@@ -1,18 +1,31 @@
-// src/outlook/auth.js
 const axios = require('axios');
+
+function decodeJwt(token) {
+    try {
+        if (!token || typeof token !== 'string') return null;
+        const parts = token.split('.');
+        if (parts.length < 2) return null;
+        return JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    } catch {
+        return null;
+    }
+}
 
 class OutlookAuth {
     constructor() {
         this.clientId = process.env.AZURE_CLIENT_ID;
         this.clientSecret = process.env.AZURE_CLIENT_SECRET;
         this.redirectUri = process.env.REDIRECT_URI;
-        this.tenant = process.env.AZURE_TENANT_ID || 'consumers';
+        this.tenant = process.env.AZURE_TENANT_ID || 'common';
         this.scopes = [
+            'openid',
+            'profile',
+            'email',
+            'offline_access',
+            'User.Read',
             'Mail.ReadWrite',
             'Mail.Send',
-            'MailboxSettings.ReadWrite',
-            'offline_access',
-            'User.Read'
+            'MailboxSettings.ReadWrite'
         ];
     }
 
@@ -44,42 +57,67 @@ class OutlookAuth {
             const response = await axios.post(tokenUrl, params, {
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
-                }
+                },
+                timeout: 15000
             });
 
             console.log('✅ Token received successfully');
 
-            // Get user info from Graph API
-            try {
-                const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
-                    headers: {
-                        'Authorization': `Bearer ${response.data.access_token}`
-                    }
-                });
+            let email = null;
+            let name = null;
 
-                return {
-                    success: true,
-                    accessToken: response.data.access_token,
-                    refreshToken: response.data.refresh_token,
-                    expiresIn: response.data.expires_in,
-                    email: userResponse.data.mail || userResponse.data.userPrincipalName,
-                    name: userResponse.data.displayName || userResponse.data.userPrincipalName
-                };
-            } catch (userError) {
-                // Fallback to token decoding
-                const tokenData = JSON.parse(
-                    Buffer.from(response.data.access_token.split('.')[1], 'base64').toString()
-                );
-                
-                return {
-                    success: true,
-                    accessToken: response.data.access_token,
-                    refreshToken: response.data.refresh_token,
-                    expiresIn: response.data.expires_in,
-                    email: tokenData.email || tokenData.preferred_username || 'user@outlook.com',
-                    name: tokenData.name || 'Outlook User'
-                };
+            // 1. Try decoding id_token (fastest & most reliable)
+            if (response.data.id_token) {
+                const idData = decodeJwt(response.data.id_token);
+                if (idData) {
+                    email = idData.preferred_username || idData.email || idData.upn;
+                    name = idData.name;
+                    if (email) console.log(`👤 User identified via id_token: ${email}`);
+                }
             }
+
+            // 2. Try Graph API /me with a strict 7s timeout
+            if (!email) {
+                try {
+                    console.log('🔍 Fetching user info from Graph API /me...');
+                    const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+                        headers: {
+                            'Authorization': `Bearer ${response.data.access_token}`
+                        },
+                        timeout: 7000
+                    });
+
+                    email = userResponse.data.mail || userResponse.data.userPrincipalName;
+                    name = userResponse.data.displayName || name;
+                    console.log(`👤 User identified via /me: ${email}`);
+                } catch (userError) {
+                    console.warn('⚠️ Could not fetch /me from Graph (continuing):', userError.message);
+                }
+            }
+
+            // 3. Fallback to access_token payload if JWT
+            if (!email) {
+                const tokenData = decodeJwt(response.data.access_token);
+                if (tokenData) {
+                    email = tokenData.email || tokenData.preferred_username || tokenData.upn;
+                    name = tokenData.name || name;
+                }
+            }
+
+            // 4. Default fallback
+            if (!email) {
+                email = 'user@outlook.com';
+                name = name || 'Outlook User';
+            }
+
+            return {
+                success: true,
+                accessToken: response.data.access_token,
+                refreshToken: response.data.refresh_token,
+                expiresIn: response.data.expires_in,
+                email: email,
+                name: name || 'Outlook User'
+            };
         } catch (error) {
             console.error('❌ Token error:', error.response?.data || error.message);
             return {

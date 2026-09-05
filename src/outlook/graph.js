@@ -14,7 +14,8 @@ class GraphClient {
                 headers: {
                     'Authorization': `Bearer ${this.accessToken}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 15000
             };
             
             if (data) {
@@ -38,20 +39,20 @@ class GraphClient {
             return response.value || [];
         } catch (error) {
             console.error('❌ Get rules error:', error.response?.data || error.message);
-            return [];
+            throw error;
         }
     }
 
-async createRule(rule) {
-    try {
-        // ✅ Make sure rule is passed as object, NOT stringified
-        const response = await this.request('POST', '/me/mailFolders/inbox/messageRules', rule);
-        return response;
-    } catch (error) {
-        console.error('❌ Create rule error:', error.response?.data || error.message);
-        throw error;
+    async createRule(rule) {
+        try {
+            // ✅ Make sure rule is passed as object, NOT stringified
+            const response = await this.request('POST', '/me/mailFolders/inbox/messageRules', rule);
+            return response;
+        } catch (error) {
+            console.error('❌ Create rule error:', error.response?.data || error.message);
+            throw error;
+        }
     }
-}
 
     async updateRule(ruleId, rule) {
         try {
@@ -84,7 +85,7 @@ async createRule(rule) {
             return blockRule?.conditions?.senderContains || [];
         } catch (error) {
             console.error('❌ Get blocked senders error:', error.message);
-            return [];
+            return null;
         }
     }
 
@@ -157,6 +158,20 @@ async createRule(rule) {
         } catch (error) {
             console.error('❌ Get user error:', error.message);
             return null;
+        }
+    }
+
+    // ============= EMAIL MESSAGES =============
+    async getRecentMessages(limit = 10) {
+        try {
+            const response = await this.request(
+                'GET',
+                `/me/mailFolders/inbox/messages?$top=${limit}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead`
+            );
+            return response.value || [];
+        } catch (error) {
+            console.error('❌ Get recent messages error:', error.message);
+            return [];
         }
     }
 }

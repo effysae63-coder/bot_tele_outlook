@@ -11,6 +11,39 @@ class RuleCommands {
         this.setupCommands();
     }
 
+    parseRuleAndEmail(input) {
+        if (!input) return { ruleName: null, email: null };
+        const trimmed = input.trim();
+
+        // 1. Quoted rule name with double quotes: "Rule Name" email@domain.com
+        const doubleQuoteMatch = trimmed.match(/^"([^"]+)"\s+(.+)$/);
+        if (doubleQuoteMatch) {
+            return {
+                ruleName: doubleQuoteMatch[1].trim(),
+                email: doubleQuoteMatch[2].trim()
+            };
+        }
+
+        // 2. Quoted rule name with single quotes: 'Rule Name' email@domain.com
+        const singleQuoteMatch = trimmed.match(/^'([^']+)'\s+(.+)$/);
+        if (singleQuoteMatch) {
+            return {
+                ruleName: singleQuoteMatch[1].trim(),
+                email: singleQuoteMatch[2].trim()
+            };
+        }
+
+        // 3. Unquoted rule name (supports spaces in rule name, email is always the last token)
+        const lastSpaceIndex = trimmed.lastIndexOf(' ');
+        if (lastSpaceIndex !== -1) {
+            const ruleName = trimmed.substring(0, lastSpaceIndex).trim().replace(/^["']|["']$/g, '');
+            const email = trimmed.substring(lastSpaceIndex + 1).trim();
+            return { ruleName, email };
+        }
+
+        return { ruleName: null, email: null };
+    }
+
     setupCommands() {
         // ============= LIST ALL RULES =============
         this.bot.onText(/\/rules(?:\s+(.+))?/, async (msg, match) => {
@@ -96,8 +129,8 @@ class RuleCommands {
                     '❌ *Usage:* `/rule add RuleName | email@outlook.com | condition:value | action:value`\n\n' +
                     '*Examples:*\n' +
                     '`/rule add BlockShopify | user@outlook.com | sender:shopify.com | action:delete`\n' +
-                    '`/rule add ForwardAmazon | user@outlook.com | subject:amazon | forward:neg4pos@gmail.com`\n' +
-                    '`/rule add eBaySticky | user@outlook.com | subject:eBay | actions:delete,forward:neg4pos@gmail.com,markread,stop`',
+                    '`/rule add ForwardAmazon | user@outlook.com | subject:amazon | forward:target@example.com`\n' +
+                    '`/rule add eBaySticky | user@outlook.com | subject:eBay | actions:delete,forward:target@example.com,markread,stop`',
                     { parse_mode: 'Markdown' }
                 );
             }
@@ -198,7 +231,7 @@ if (conditions.length === 0) {
         // ============= TOGGLE RULE =============
         this.bot.onText(/\/rule toggle (.+)/, async (msg, match) => {
             const chatId = msg.chat.id;
-            const [ruleName, email] = match[1].split(' ');
+            const { ruleName, email } = this.parseRuleAndEmail(match[1]);
 
             if (!ruleName || !email) {
                 return this.bot.sendMessage(chatId,
@@ -250,7 +283,7 @@ if (conditions.length === 0) {
         // ============= REMOVE RULE =============
         this.bot.onText(/\/rule remove (.+)/, async (msg, match) => {
             const chatId = msg.chat.id;
-            const [ruleName, email] = match[1].split(' ');
+            const { ruleName, email } = this.parseRuleAndEmail(match[1]);
 
             if (!ruleName || !email) {
                 return this.bot.sendMessage(chatId,
@@ -305,7 +338,7 @@ if (conditions.length === 0) {
         // ============= RESTORE RULE =============
         this.bot.onText(/\/rule restore (.+)/, async (msg, match) => {
             const chatId = msg.chat.id;
-            const [ruleName, email] = match[1].split(' ');
+            const { ruleName, email } = this.parseRuleAndEmail(match[1]);
 
             if (!ruleName || !email) {
                 return this.bot.sendMessage(chatId,

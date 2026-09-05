@@ -9,7 +9,7 @@ class SenderCommands {
         this.outlookAuth = outlookAuth;
         this.blockedManager = blockedManager;
         this.ruleManager = ruleManager;
-        this.TARGET_EMAIL = process.env.FORWARD_TARGET_EMAIL || 'neg4pos@gmail.com';
+        this.TARGET_EMAIL = process.env.FORWARD_TARGET_EMAIL;
         
         // Bind methods
         this.enableForward = this.enableForward.bind(this);
@@ -61,8 +61,8 @@ class SenderCommands {
 
             if (args.length < 1) {
                 return this.bot.sendMessage(chatId,
-                    '❌ *Usage:* `/forward @ebay.com neg4pos@gmail.com`\n' +
-                    '       `/forward spam@example.com target@gmail.com`\n' +
+                    '❌ *Usage:* `/forward @ebay.com target@example.com`\n' +
+                    '       `/forward spam@example.com target@example.com`\n' +
                     '       `/forward off @ebay.com` - Disable forwarding',
                     { parse_mode: 'Markdown' }
                 );
@@ -78,6 +78,9 @@ class SenderCommands {
                 } else {
                     const sender = args[0];
                     const targetEmail = args[1] || this.TARGET_EMAIL;
+                    if (!targetEmail) {
+                        return this.bot.sendMessage(chatId, '❌ Please specify a target email (e.g. `/forward @domain user@example.com`) or set FORWARD_TARGET_EMAIL in .env');
+                    }
                     await this.enableForward(chatId, sender, targetEmail);
                 }
             } catch (error) {

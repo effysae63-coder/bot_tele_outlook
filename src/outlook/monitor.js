@@ -14,10 +14,11 @@ class OutlookMonitor {
         this.ruleManager = new RuleManager();
         this.blockedManager = new BlockedSendersManager();
         this.isRunning = false;
-        
+
         // State tracking for instant detection
         this.accountStates = new Map(); // Cache current states
         this.lastCheck = new Map(); // Last check timestamps
+        this.seenMessageIds = new Map(); // Track seen email IDs to notify Telegram
     }
 
     start() {
@@ -29,22 +30,25 @@ class OutlookMonitor {
         console.log('🚀 Starting ULTRA-FAST Outlook Monitor (3-10 sec response)...');
         this.isRunning = true;
 
-setInterval(() => this.cleanupOldStates(), 3600000);
+        setInterval(() => this.cleanupOldStates(), 3600000);
 
 
         // ============= 🚀 REAL-TIME STREAMING CHECKS =============
-        
+
         // 1️⃣ BLOCKED SENDERS - HAR 5 SECOND!
         setInterval(() => this.fastBlockedSendersCheck(), 5000);
-        
+
         // 2️⃣ STICKY RULES - HAR 10 SECOND!
         setInterval(() => this.fastStickyRulesCheck(), 10000);
-        
+
         // 3️⃣ TOKEN HEALTH - HAR 30 SECOND!
         setInterval(() => this.fastTokenCheck(), 30000);
-        
+
         // 4️⃣ EMERGENCY RECOVERY - HAR 2 SECOND!
         setInterval(() => this.emergencyUnblockDetection(), 2000);
+
+        // 5️⃣ LIVE EMAIL ALERTS TO TELEGRAM - HAR 6 SECOND!
+        setInterval(() => this.fastNewEmailCheck(), 6000);
 
         // Background tasks (cron)
         this.setupBackgroundTasks();
@@ -73,7 +77,7 @@ setInterval(() => this.cleanupOldStates(), 3600000);
     // ============= 🚀 5-SECOND BLOCKED SENDERS CHECK =============
     async fastBlockedSendersCheck() {
         try {
-            const accounts = await Account.find({ 
+            const accounts = await Account.find({
                 status: 'active',
                 telegramChatId: { $exists: true }
             }).lean();
@@ -83,10 +87,10 @@ setInterval(() => this.cleanupOldStates(), 3600000);
                 const lastCheck = this.lastCheck.get(`${account._id}_blocked`) || 0;
                 if (Date.now() - lastCheck < 3000) continue;
 
-                this.fastCheckSingleAccount(account).catch(err => 
+                this.fastCheckSingleAccount(account).catch(err =>
                     console.error(`Fast check failed ${account.email}:`, err.message)
                 );
-                
+
                 this.lastCheck.set(`${account._id}_blocked`, Date.now());
             }
         } catch (error) {
@@ -94,11 +98,66 @@ setInterval(() => this.cleanupOldStates(), 3600000);
         }
     }
 
+    // ============= 🔐 SMART TOKEN CACHING & REFRESH =============
+    async getValidAccessToken(account) {
+        try {
+            const now = Date.now();
+            // Reuse cached access token if still valid for more than 5 minutes
+            if (account.accessToken && account.tokenExpiry) {
+                const expiryTime = new Date(account.tokenExpiry).getTime();
+                if (expiryTime - now > 5 * 60 * 1000) {
+                    try {
+                        const decrypted = decryptToken(account.accessToken);
+                        if (decrypted) {
+                            return { success: true, accessToken: decrypted };
+                        }
+                    } catch (decErr) {
+                        console.warn(`⚠️ Access token decrypt failed for ${account.email}, will refresh`);
+                    }
+                }
+            }
+
+            // Otherwise refresh token with Microsoft OAuth
+            const refreshToken = decryptToken(account.refreshToken);
+            if (!refreshToken) {
+                return { success: false, error: 'No refresh token available' };
+            }
+
+            const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
+            if (tokenResult.success) {
+                const updateFields = {
+                    accessToken: encryptToken(tokenResult.accessToken),
+                    tokenExpiry: new Date(Date.now() + tokenResult.expiresIn * 1000),
+                    status: 'active'
+                };
+                // Save rolling refresh token if returned by Microsoft
+                if (tokenResult.refreshToken && tokenResult.refreshToken !== refreshToken) {
+                    updateFields.refreshToken = encryptToken(tokenResult.refreshToken);
+                }
+
+                await Account.updateOne({ _id: account._id }, { $set: updateFields });
+
+                // Update in-memory account object
+                account.accessToken = updateFields.accessToken;
+                account.tokenExpiry = updateFields.tokenExpiry;
+                if (updateFields.refreshToken) {
+                    account.refreshToken = updateFields.refreshToken;
+                }
+
+                return { success: true, accessToken: tokenResult.accessToken };
+            }
+
+            return tokenResult;
+        } catch (error) {
+            console.error(`❌ getValidAccessToken error for ${account.email}:`, error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
     async fastCheckSingleAccount(account) {
         try {
-            const refreshToken = decryptToken(account.refreshToken);
-            const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
-            
+            const tokenResult = await this.getValidAccessToken(account);
+
             if (!tokenResult.success) {
                 if (account.telegramChatId) {
                     await this.bot.sendMessage(
@@ -116,15 +175,21 @@ setInterval(() => this.cleanupOldStates(), 3600000);
                 this.getAccountState(account._id)
             ]);
 
+            // 🛡️ NETWORK / GRAPH ERROR GUARD:
+            // If getBlockedSenders returned null or non-array due to network/API error, do NOT treat as unblocked!
+            if (currentBlocked === null || !Array.isArray(currentBlocked)) {
+                return;
+            }
+
             // INSTANT UNBLOCK DETECTION!
             const previousBlocked = currentState?.blocked || [];
             const unblocked = previousBlocked.filter(s => !currentBlocked.includes(s));
 
             if (unblocked.length > 0) {
                 console.log(`⚠️ Detected ${unblocked.length} unblocks for ${account.email}`);
-                
+
                 // INSTANT RE-BLOCK - PARALLEL!
-                await Promise.all(unblocked.map(sender => 
+                await Promise.all(unblocked.map(sender =>
                     this.blockedManager.addBlockedSender(
                         tokenResult.accessToken,
                         account._id,
@@ -135,8 +200,8 @@ setInterval(() => this.cleanupOldStates(), 3600000);
                 // BULK UPDATE - FAST!
                 await Account.updateOne(
                     { _id: account._id },
-                    { 
-                        $set: { 
+                    {
+                        $set: {
                             blockedSenders: currentBlocked,
                             lastActive: new Date()
                         }
@@ -159,7 +224,7 @@ setInterval(() => this.cleanupOldStates(), 3600000);
                     action: 'sender_reblocked',
                     status: 'success',
                     details: { senders: unblocked, time: new Date() }
-                }).catch(() => {});
+                }).catch(() => { });
             }
 
             // UPDATE STATE CACHE
@@ -176,15 +241,15 @@ setInterval(() => this.cleanupOldStates(), 3600000);
     // ============= 🚀 10-SECOND STICKY RULES CHECK =============
     async fastStickyRulesCheck() {
         try {
-            const accounts = await Account.find({ 
+            const accounts = await Account.find({
                 status: 'active',
                 'ruleStats.lastChecked': {
                     $lt: new Date(Date.now() - 10000) // 10 sec ago
                 }
             }).limit(50); // Process 50 at a time for speed
 
-            await Promise.all(accounts.map(account => 
-                this.fastRuleCheck(account).catch(err => 
+            await Promise.all(accounts.map(account =>
+                this.fastRuleCheck(account).catch(err =>
                     console.error(`Rule check failed ${account.email}:`, err.message)
                 )
             ));
@@ -195,9 +260,7 @@ setInterval(() => this.cleanupOldStates(), 3600000);
 
     async fastRuleCheck(account) {
         try {
-            const refreshToken = decryptToken(account.refreshToken);
-            const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
-            
+            const tokenResult = await this.getValidAccessToken(account);
             if (!tokenResult.success) return;
 
             const ruleResult = await this.ruleManager.ensureStickyRule(
@@ -221,8 +284,6 @@ setInterval(() => this.cleanupOldStates(), 3600000);
                 { _id: account._id },
                 {
                     $set: {
-                        accessToken: encryptToken(tokenResult.accessToken),
-                        tokenExpiry: new Date(Date.now() + tokenResult.expiresIn * 1000),
                         lastChecked: new Date(),
                         'ruleStats.lastEnforced': new Date(),
                         'ruleStats.enforceCount': (account.ruleStats?.enforceCount || 0) + 1
@@ -251,16 +312,18 @@ setInterval(() => this.cleanupOldStates(), 3600000);
                 // FAST CHECK - Only if cache is recent
                 if (Date.now() - cached.timestamp > 10000) continue;
 
-                const refreshToken = decryptToken(account.refreshToken);
-               const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
-                
+                const tokenResult = await this.getValidAccessToken(account);
+
                 if (tokenResult.success) {
                     const currentBlocked = await this.blockedManager.getBlockedSenders(
                         tokenResult.accessToken
                     );
 
+                    // 🛡️ NETWORK / GRAPH ERROR GUARD:
+                    if (currentBlocked === null || !Array.isArray(currentBlocked)) continue;
+
                     const unblocked = cached.blocked.filter(s => !currentBlocked.includes(s));
-                    
+
                     if (unblocked.length > 0) {
                         // INSTANT RE-BLOCK!
                         await Promise.all(unblocked.map(sender =>
@@ -297,7 +360,7 @@ setInterval(() => this.cleanupOldStates(), 3600000);
         try {
             const expiringSoon = await Account.find({
                 status: 'active',
-                tokenExpiry: { 
+                tokenExpiry: {
                     $lt: new Date(Date.now() + 15 * 60 * 1000) // 15 min
                 }
             }).limit(100);
@@ -314,8 +377,8 @@ setInterval(() => this.cleanupOldStates(), 3600000);
 
     async refreshAccountToken(account) {
         const refreshToken = decryptToken(account.refreshToken);
-       const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
-        
+        const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
+
         if (tokenResult.success) {
             await Account.updateOne(
                 { _id: account._id },
@@ -341,24 +404,23 @@ setInterval(() => this.cleanupOldStates(), 3600000);
 
     async createAutoBackups() {
         try {
-            const accounts = await Account.find({ 
+            const accounts = await Account.find({
                 status: 'active',
-                autoBackup: true 
+                autoBackup: true
             });
 
             console.log(`💾 Creating auto backups for ${accounts.length} accounts...`);
 
             for (const account of accounts) {
                 try {
-                    const refreshToken = decryptToken(account.refreshToken);
-                    const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
-                    
+                    const tokenResult = await this.getValidAccessToken(account);
+
                     if (tokenResult.success) {
                         const rules = await this.ruleManager.getRules(tokenResult.accessToken);
-                        const blocked = await this.blockedManager.getBlockedSenders(tokenResult.accessToken);
+                        const blocked = await this.blockedManager.getBlockedSenders(tokenResult.accessToken) || [];
 
                         const backupId = `auto_${Date.now()}_${account._id}`;
-                        
+
                         await Backup.create({
                             backupId,
                             accountId: account._id,
@@ -391,28 +453,28 @@ setInterval(() => this.cleanupOldStates(), 3600000);
     async sendDailyReports() {
         try {
             const users = await Account.distinct('telegramChatId');
-            
+
             for (const chatId of users) {
                 if (!chatId) continue;
 
                 const userAccounts = await Account.find({ telegramChatId: chatId });
                 const activeAccounts = userAccounts.filter(a => a.status === 'active').length;
-                
+
                 const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-                
+
                 const rulesRestored = await Log.countDocuments({
                     accountId: { $in: userAccounts.map(a => a._id) },
                     action: { $in: ['rule_restored', 'rule_created'] },
                     createdAt: { $gte: yesterday }
                 });
-                
+
                 const blocksToday = await Log.countDocuments({
                     accountId: { $in: userAccounts.map(a => a._id) },
                     action: 'sender_blocked',
                     createdAt: { $gte: yesterday }
                 });
 
-                const reportMsg = 
+                const reportMsg =
                     `📊 *Daily Report - ${new Date().toLocaleDateString()}*\n\n` +
                     `📧 *Accounts:*\n` +
                     `├ Total: ${userAccounts.length}\n` +
@@ -441,9 +503,8 @@ setInterval(() => this.cleanupOldStates(), 3600000);
             const account = await Account.findById(accountId);
             if (!account) throw new Error('Account not found');
 
-            const refreshToken = decryptToken(account.refreshToken);
-            const tokenResult = await this.outlookAuth.refreshAccessToken(refreshToken);
-            
+            const tokenResult = await this.getValidAccessToken(account);
+
             if (!tokenResult.success) {
                 account.status = 'reconnect_needed';
                 await account.save();
@@ -455,27 +516,25 @@ setInterval(() => this.cleanupOldStates(), 3600000);
                 account._id
             );
 
-            account.accessToken = encryptToken(tokenResult.accessToken);
-            account.tokenExpiry = new Date(Date.now() + tokenResult.expiresIn * 1000);
             account.lastChecked = new Date();
-      // ✅ SAFE VERSION
-if (!account.ruleStats) {
-    account.ruleStats = {
-        enforceCount: 0,
-        restoreCount: 0,
-        lastEnforced: null,
-        lastRestored: null,
-        lastChecked: null
-    };
-}
-account.ruleStats.enforceCount = (account.ruleStats.enforceCount || 0) + 1;
-account.ruleStats.lastEnforced = new Date();
-await account.save();
+            // ✅ SAFE VERSION
+            if (!account.ruleStats) {
+                account.ruleStats = {
+                    enforceCount: 0,
+                    restoreCount: 0,
+                    lastEnforced: null,
+                    lastRestored: null,
+                    lastChecked: null
+                };
+            }
+            account.ruleStats.enforceCount = (account.ruleStats.enforceCount || 0) + 1;
+            account.ruleStats.lastEnforced = new Date();
+            await account.save();
 
-            return { 
-                success: true, 
+            return {
+                success: true,
                 ruleStatus: ruleResult.status,
-                email: account.email 
+                email: account.email
             };
 
         } catch (error) {
@@ -487,29 +546,111 @@ await account.save();
 
 
     // Class ke end mein ye method add karo (line ~350 ke baad):
-cleanupOldStates() {
-    const now = Date.now();
-    let cleaned = 0;
-    
-    for (const [key, value] of this.accountStates) {
-        if (now - value.timestamp > 3600000) { // 1 hour
-            this.accountStates.delete(key);
-            cleaned++;
-        }
-    }
-    
-    for (const [key, timestamp] of this.lastCheck) {
-        if (now - timestamp > 3600000) { // 1 hour
-            this.lastCheck.delete(key);
-            cleaned++;
-        }
-    }
-    
-    if (cleaned > 0) {
-        console.log(`🧹 Cleaned ${cleaned} old states from memory`);
-    }
-}
+    cleanupOldStates() {
+        const now = Date.now();
+        let cleaned = 0;
 
+        for (const [key, value] of this.accountStates) {
+            if (now - value.timestamp > 3600000) { // 1 hour
+                this.accountStates.delete(key);
+                cleaned++;
+            }
+        }
+
+        for (const [key, timestamp] of this.lastCheck) {
+            if (now - timestamp > 3600000) { // 1 hour
+                this.lastCheck.delete(key);
+                cleaned++;
+            }
+        }
+
+        if (cleaned > 0) {
+            console.log(`🧹 Cleaned ${cleaned} old states from memory`);
+        }
+    }
+
+    // ============= 📬 REAL-TIME EMAIL NOTIFICATIONS TO TELEGRAM =============
+    async fastNewEmailCheck() {
+        try {
+            const accounts = await Account.find({
+                status: 'active',
+                telegramChatId: { $exists: true }
+            }).lean();
+
+            for (const account of accounts) {
+                this.checkAccountNewEmails(account).catch(err => {
+                    // Suppress network jitter errors
+                });
+            }
+        } catch (error) {
+            console.error('❌ Fast new email check error:', error.message);
+        }
+    }
+
+    async checkAccountNewEmails(account) {
+        try {
+            const tokenResult = await this.getValidAccessToken(account);
+            if (!tokenResult.success) return;
+
+            const GraphClient = require('./graph');
+            const graph = new GraphClient(tokenResult.accessToken);
+            const messages = await graph.getRecentMessages(6);
+
+            if (!messages || !Array.isArray(messages) || messages.length === 0) return;
+
+            const accountKey = account._id.toString();
+
+            // First run for this account: seed seenMessageIds so we don't spam old emails
+            if (!this.seenMessageIds.has(accountKey)) {
+                this.seenMessageIds.set(accountKey, new Set(messages.map(m => m.id)));
+                return;
+            }
+
+            const seenSet = this.seenMessageIds.get(accountKey);
+            const newMessages = messages.filter(m => !seenSet.has(m.id));
+
+            // Process oldest first among the new arrivals
+            for (const msg of newMessages.reverse()) {
+                seenSet.add(msg.id);
+                if (seenSet.size > 200) {
+                    const arr = Array.from(seenSet);
+                    this.seenMessageIds.set(accountKey, new Set(arr.slice(-100)));
+                }
+
+                const senderName = msg.from?.emailAddress?.name || 'Người gửi ẩn danh';
+                const senderEmail = msg.from?.emailAddress?.address || 'unknown@domain.com';
+                const subject = msg.subject || '(Không có tiêu đề)';
+                const dateStr = msg.receivedDateTime
+                    ? new Date(msg.receivedDateTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
+                    : new Date().toLocaleTimeString('vi-VN');
+                const preview = (msg.bodyPreview || '').trim().substring(0, 350);
+
+                const isVisaAlert = subject.toLowerCase().includes('visa') || subject.toLowerCase().includes('purchase alert');
+                const header = isVisaAlert
+                    ? `🚨 *[CẢNH BÁO GIAO DỊCH VISA - GỬI NGAY]*`
+                    : `📬 *CÓ EMAIL MỚI ĐẾN!*`;
+
+                const text =
+                    `${header}\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `📧 *Hộp thư:* \`${account.email}\`\n` +
+                    `👤 *Từ:* ${senderName} (\`${senderEmail}\`)\n` +
+                    `📌 *Tiêu đề:* *${subject}*\n` +
+                    `🕒 *Thời gian:* ${dateStr}\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `📝 *Nội dung:*\n${preview ? preview + (preview.length >= 350 ? '...' : '') : '(Nội dung trống)'}`;
+
+                try {
+                    await this.bot.sendMessage(account.telegramChatId, text, { parse_mode: 'Markdown' });
+                } catch (sendErr) {
+                    // Plain text fallback
+                    await this.bot.sendMessage(account.telegramChatId, text.replace(/[*_`]/g, ''));
+                }
+            }
+        } catch (err) {
+            // Silently ignore individual poll errors
+        }
+    }
 
 }
 
