@@ -15,8 +15,22 @@ class OutlookAuth {
     constructor() {
         this.clientId = process.env.AZURE_CLIENT_ID;
         this.clientSecret = process.env.AZURE_CLIENT_SECRET;
-        this.redirectUri = process.env.REDIRECT_URI;
         this.tenant = process.env.AZURE_TENANT_ID || 'common';
+        
+        let uri = (process.env.REDIRECT_URI || '').trim();
+        if (!uri) {
+            uri = 'https://outlook-telegram-bot-production.up.railway.app/auth/callback';
+        } else {
+            if (!uri.startsWith('http://') && !uri.startsWith('https://')) {
+                uri = `https://${uri}`;
+            }
+            if (!uri.includes('/auth/callback')) {
+                uri = uri.replace(/\/+$/, '') + '/auth/callback';
+            }
+        }
+        this.redirectUri = uri;
+        console.log('🔗 OutlookAuth Redirect URI:', this.redirectUri);
+
         this.scopes = [
             'openid',
             'profile',
