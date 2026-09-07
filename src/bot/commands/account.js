@@ -19,21 +19,9 @@ class AccountCommands {
             const chatId = msg.chat.id;
             
             try {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                
-                const todayCount = await Account.countDocuments({
-                    telegramChatId: chatId.toString(),
-                    createdAt: { $gte: today }
+                const totalCount = await Account.countDocuments({
+                    telegramChatId: chatId.toString()
                 });
-                
-                if (todayCount >= 10) {
-                    return this.bot.sendMessage(chatId,
-                        '❌ *Daily limit reached*\nMaximum 10 accounts per day.\n' +
-                        `Today: ${todayCount}/10`,
-                        { parse_mode: 'Markdown' }
-                    );
-                }
 
                 const authUrl = this.outlookAuth.getAuthUrl();
                 
@@ -45,7 +33,7 @@ class AccountCommands {
 
                 await this.bot.sendMessage(chatId,
                     '🔗 *ADD OUTLOOK ACCOUNT*\n\n' +
-                    `📊 Daily: ${todayCount}/10\n\n` +
+                    `📊 Tổng tài khoản hiện tại: ${totalCount}\n\n` +
                     '1️⃣ Click link\n' +
                     '2️⃣ Login with Outlook\n' +
                     '3️⃣ Authorize\n' +
