@@ -213,7 +213,6 @@ class OutlookTelegramBot {
                 '  → Click link, login, paste URL back\n' +
                 '  → Sticky rule auto-created\n\n' +
                 '• `/remove user@outlook.com` - Remove account\n' +
-                '• `/remove all` - Remove all accounts\n' +
                 '• `/list` - Show all accounts with status\n' +
                 '• `/status user@outlook.com` - Detailed status\n' +
                 '• `/history user@outlook.com` - Full history\n' +

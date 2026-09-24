@@ -59,78 +59,55 @@ class AccountCommands {
 
             if (!email) {
                 return this.bot.sendMessage(chatId,
-                    '❌ *Usage:* `/remove user@outlook.com`\n' +
-                    '       `/remove all` - Remove all accounts',
+                    '❌ *Usage:* `/remove user@outlook.com`',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+
+            if (email.toLowerCase() === 'all') {
+                return this.bot.sendMessage(chatId,
+                    '⚠️ Chức năng `/remove all` đã bị vô hiệu hóa để bảo đảm an toàn dữ liệu. Vui lòng chỉ xóa từng tài khoản bằng lệnh:\n`/remove user@outlook.com`',
                     { parse_mode: 'Markdown' }
                 );
             }
 
             try {
-                if (email === 'all') {
-                    const accounts = await Account.find({ telegramChatId: chatId.toString() });
-                    
-                    for (const account of accounts) {
-                        await Backup.create({
-                            backupId: `pre_remove_${Date.now()}_${account._id}`,
-                            accountId: account._id,
-                            accountEmail: account.email,
-                            snapshot: {
-                                rules: account.rules || [],
-                                blockedSenders: account.blockedSenders || [],
-                                forwardRules: account.forwardRules || [],
-                                timestamp: new Date()
-                            },
-                            type: 'manual',
-                            metadata: { createdBy: msg.from.username, reason: 'bulk_removal_backup' }
-                        });
-                    }
+                const account = await Account.findOne({
+                    email: email.toLowerCase(),
+                    telegramChatId: chatId.toString()
+                });
 
-                    const result = await Account.deleteMany({ telegramChatId: chatId.toString() });
-                    
-                    await this.bot.sendMessage(chatId,
-                        `🗑️ *All Accounts Removed*\n\n` +
-                        `📧 Total: ${result.deletedCount} accounts\n` +
-                        `💾 Backups created for recovery`,
-                        { parse_mode: 'Markdown' }
-                    );
-                } else {
-                    const account = await Account.findOne({
-                        email: email.toLowerCase(),
-                        telegramChatId: chatId.toString()
-                    });
-
-                    if (!account) {
-                        return this.bot.sendMessage(chatId,
-                            `❌ Account \`${email}\` not found`,
-                            { parse_mode: 'Markdown' }
-                        );
-                    }
-
-                    const backupId = `pre_remove_${Date.now()}`;
-                    await Backup.create({
-                        backupId,
-                        accountId: account._id,
-                        accountEmail: account.email,
-                        snapshot: {
-                            rules: account.rules || [],
-                            blockedSenders: account.blockedSenders || [],
-                            forwardRules: account.forwardRules || [],
-                            timestamp: new Date()
-                        },
-                        type: 'manual',
-                        metadata: { createdBy: msg.from.username, reason: 'account_removal' }
-                    });
-
-                    await Account.deleteOne({ _id: account._id });
-
-                    await this.bot.sendMessage(chatId,
-                        `🗑️ *Account Removed*\n\n` +
-                        `📧 ${account.email}\n` +
-                        `💾 Backup ID: \`${backupId}\`\n\n` +
-                        `_Use /restore ${account.email} ${backupId} to recover_`,
+                if (!account) {
+                    return this.bot.sendMessage(chatId,
+                        `❌ Account \`${email}\` not found`,
                         { parse_mode: 'Markdown' }
                     );
                 }
+
+                const backupId = `pre_remove_${Date.now()}`;
+                await Backup.create({
+                    backupId,
+                    accountId: account._id,
+                    accountEmail: account.email,
+                    snapshot: {
+                        rules: account.rules || [],
+                        blockedSenders: account.blockedSenders || [],
+                        forwardRules: account.forwardRules || [],
+                        timestamp: new Date()
+                    },
+                    type: 'manual',
+                    metadata: { createdBy: msg.from.username, reason: 'account_removal' }
+                });
+
+                await Account.deleteOne({ _id: account._id });
+
+                await this.bot.sendMessage(chatId,
+                    `🗑️ *Account Removed*\n\n` +
+                    `📧 ${account.email}\n` +
+                    `💾 Backup ID: \`${backupId}\`\n\n` +
+                    `_Use /restore ${account.email} ${backupId} to recover_`,
+                    { parse_mode: 'Markdown' }
+                );
 
                 global.botStats.totalAccounts = await Account.countDocuments();
 

@@ -17,7 +17,6 @@
 | **/history** | `/history zahid@outlook.com` | 📜 Account ki 20 latest activities dikhayega (Block, Forward, Rule restore etc) |
 | **/reconnect** | `/reconnect zahid@outlook.com` | 🔄 Token expire ho gaya hai to reconnect karega (Same process as /add) |
 | **/remove** | `/remove zahid@outlook.com` | 🗑️ Account remove karega. **Auto-backup** bana ke rakh dega! |
-| **/remove all** | `/remove all` | 🗑️🗑️ Aapke SAARE accounts ek saath remove karega. Sab ka backup banaega! |
 
 ---
 
