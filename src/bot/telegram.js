@@ -6,6 +6,7 @@ const BlockedSendersManager = require('../outlook/blocked');
 const Account = require('../models/Account');
 const Log = require('../models/Log');
 const { encryptToken, decryptToken } = require('../utils/encryption');
+const { escapeMarkdown, safeSendMessage } = require('../utils/telegramHelper');
 
 // Import command modules
 const AccountCommands = require('./commands/account');
@@ -334,10 +335,10 @@ class OutlookTelegramBot {
 
                 const account = await Account.findOne(query);
                 if (!account) {
-                    return this.bot.sendMessage(chatId, '❌ Không tìm thấy tài khoản Outlook nào đang hoạt động. Dùng /add để thêm tài khoản.');
+                    return safeSendMessage(this.bot, chatId, '❌ Không tìm thấy tài khoản Outlook nào đang hoạt động. Dùng /add để thêm tài khoản.');
                 }
 
-                await this.bot.sendMessage(chatId, `⏳ Đang tải 5 email mới nhất từ *${account.email}*...`, { parse_mode: 'Markdown' });
+                await safeSendMessage(this.bot, chatId, `⏳ Đang tải 5 email mới nhất từ *${escapeMarkdown(account.email)}*...`, { parse_mode: 'Markdown' });
 
                 const { decryptToken } = require('../utils/encryption');
                 const GraphClient = require('../outlook/graph');
@@ -354,19 +355,19 @@ class OutlookTelegramBot {
                 const messages = await graph.getRecentMessages(5);
 
                 if (!messages || messages.length === 0) {
-                    return this.bot.sendMessage(chatId, `📭 Hộp thư *${account.email}* hiện không có thư nào.`, { parse_mode: 'Markdown' });
+                    return safeSendMessage(this.bot, chatId, `📭 Hộp thư *${escapeMarkdown(account.email)}* hiện không có thư nào.`, { parse_mode: 'Markdown' });
                 }
 
                 let reply = `📬 *5 EMAIL MỚI NHẤT TRONG HỘP THƯ*\n`;
-                reply += `📧 Tài khoản: \`${account.email}\`\n`;
+                reply += `📧 Tài khoản: \`${escapeMarkdown(account.email)}\`\n`;
                 reply += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
                 messages.forEach((m, idx) => {
-                    const senderName = m.from?.emailAddress?.name || 'Ẩn danh';
-                    const senderAddr = m.from?.emailAddress?.address || 'Unknown';
-                    const subject = m.subject || '(Không có tiêu đề)';
+                    const senderName = escapeMarkdown(m.from?.emailAddress?.name || 'Ẩn danh');
+                    const senderAddr = escapeMarkdown(m.from?.emailAddress?.address || 'Unknown');
+                    const subject = escapeMarkdown(m.subject || '(Không có tiêu đề)');
                     const time = m.receivedDateTime ? new Date(m.receivedDateTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '';
-                    const preview = (m.bodyPreview || '').trim().substring(0, 150);
+                    const preview = escapeMarkdown((m.bodyPreview || '').trim().substring(0, 150));
 
                     reply += `*${idx + 1}. ${subject}*\n`;
                     reply += `   👤 Từ: ${senderName} (\`${senderAddr}\`)\n`;
@@ -375,15 +376,11 @@ class OutlookTelegramBot {
                     reply += `\n`;
                 });
 
-                try {
-                    await this.bot.sendMessage(chatId, reply, { parse_mode: 'Markdown' });
-                } catch (sendErr) {
-                    await this.bot.sendMessage(chatId, reply.replace(/[*_`]/g, ''));
-                }
+                await safeSendMessage(this.bot, chatId, reply, { parse_mode: 'Markdown' });
 
             } catch (error) {
                 console.error('❌ /inbox command error:', error.message);
-                await this.bot.sendMessage(chatId, `❌ Lỗi khi tải hộp thư: ${error.message}`);
+                await safeSendMessage(this.bot, chatId, `❌ Lỗi khi tải hộp thư: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
             }
         });
     }
@@ -400,20 +397,40 @@ class OutlookTelegramBot {
     }
 
     async handleAuthCallback(chatId, text, msg) {
-        if (!global.pendingAuth?.has(chatId)) {
-            return this.bot.sendMessage(chatId,
-                '❌ No active session. Use /add first.',
-                { parse_mode: 'Markdown' }
-            );
-        }
-
-        await this.bot.sendMessage(chatId, '⏳ Authenticating...');
+        await safeSendMessage(this.bot, chatId, '⏳ Đang xác thực tài khoản...');
 
         try {
             console.log('🔑 Extracting code from URL...');
-            const urlParams = new URLSearchParams(text.split('?')[1]);
+            const urlParts = text.split('?');
+            if (urlParts.length < 2) {
+                return safeSendMessage(this.bot, chatId, '❌ URL không hợp lệ hoặc thiếu tham số code.');
+            }
+            const urlParams = new URLSearchParams(urlParts[1]);
             const code = urlParams.get('code');
-            console.log('🔑 Code extracted:', code ? `${code.substring(0, 15)}...` : 'NONE');
+            if (!code) {
+                return safeSendMessage(this.bot, chatId, '❌ Không tìm thấy mã code trong URL.');
+            }
+
+            await this.processAuthorizationCode(code, chatId, msg.from?.username || msg.from?.first_name);
+        } catch (error) {
+            console.error('❌ Manual auth callback error:', error);
+            await safeSendMessage(this.bot, chatId, `❌ Lỗi xác thực: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
+        }
+    }
+
+    /**
+     * Unified OAuth code processor.
+     * Can be invoked directly from the HTTP web callback (zero-click) or via manual URL paste.
+     */
+    async processAuthorizationCode(code, chatId, username = null) {
+        if (!chatId) {
+            throw new Error('chatId is required to link Outlook account to Telegram.');
+        }
+
+        const numericChatId = chatId.toString();
+
+        try {
+            console.log(`🔑 Processing authorization code for chatId: ${numericChatId}...`);
 
             const authResult = await this.outlookAuth.getTokenFromCode(code);
             console.log('🔑 authResult:', {
@@ -425,7 +442,21 @@ class OutlookTelegramBot {
             });
 
             if (!authResult.success) {
-                throw new Error(authResult.error);
+                await safeSendMessage(this.bot, numericChatId,
+                    `❌ *Xác thực thất bại*\n\n${escapeMarkdown(authResult.error || 'Không nhận được mã xác thực từ Microsoft.')}`,
+                    { parse_mode: 'Markdown' }
+                );
+                return { success: false, error: authResult.error };
+            }
+
+            // Get Telegram username if not provided
+            if (!username) {
+                try {
+                    const chatInfo = await this.bot.getChat(numericChatId);
+                    username = chatInfo.username || chatInfo.first_name || 'User';
+                } catch {
+                    username = 'User';
+                }
             }
 
             console.log('🔍 Querying MongoDB for existing account...');
@@ -439,21 +470,18 @@ class OutlookTelegramBot {
                 account.accessToken = encryptToken(authResult.accessToken);
                 account.tokenExpiry = new Date(Date.now() + authResult.expiresIn * 1000);
                 account.status = 'active';
-                account.telegramChatId = chatId.toString();
-                account.telegramUsername = msg.from.username || msg.from.first_name || 'User';
+                account.telegramChatId = numericChatId;
+                account.telegramUsername = username;
                 await account.save();
                 console.log('✅ Existing account updated successfully');
 
-                try {
-                    await this.bot.sendMessage(chatId,
-                        `✅ *Account Updated!*\n\n` +
-                        `📧 ${authResult.email}\n` +
-                        `🔄 Existing account reconnected`,
-                        { parse_mode: 'Markdown' }
-                    );
-                } catch (sendErr) {
-                    await this.bot.sendMessage(chatId, `✅ Account Updated!\n\n📧 ${authResult.email}`);
-                }
+                await safeSendMessage(this.bot, numericChatId,
+                    `✅ *Tài khoản đã được cập nhật!*\n\n` +
+                    `📧 Email: \`${escapeMarkdown(authResult.email)}\`\n` +
+                    `👤 Người dùng: ${escapeMarkdown(authResult.name || username)}\n` +
+                    `🔄 Trạng thái: Đã kết nối lại thành công`,
+                    { parse_mode: 'Markdown' }
+                );
             } else {
                 // Create new account
                 console.log('🆕 Creating new account document...');
@@ -463,8 +491,8 @@ class OutlookTelegramBot {
                     accessToken: encryptToken(authResult.accessToken),
                     tokenExpiry: new Date(Date.now() + authResult.expiresIn * 1000),
                     status: 'active',
-                    telegramChatId: chatId.toString(),
-                    telegramUsername: msg.from.username || msg.from.first_name || 'User',
+                    telegramChatId: numericChatId,
+                    telegramUsername: username,
                     stickyRules: ['Sticky_eBay_Microsoft_Rule'],
                     autoBackup: true,
                     stats: { rulesEnforced: 0, rulesRestored: 0, sendersBlocked: 0, emailsForwarded: 0 },
@@ -484,17 +512,13 @@ class OutlookTelegramBot {
                 await account.save();
                 console.log('✅ New account saved with ID:', account._id);
 
-                try {
-                    await this.bot.sendMessage(chatId,
-                        `✅ *New Account Connected!*\n\n` +
-                        `📧 ${authResult.email}\n` +
-                        `👤 ${authResult.name || 'User'}\n\n` +
-                        `🔄 Creating sticky rule...`,
-                        { parse_mode: 'Markdown' }
-                    );
-                } catch (sendErr) {
-                    await this.bot.sendMessage(chatId, `✅ New Account Connected!\n\n📧 ${authResult.email}\n👤 ${authResult.name || 'User'}`);
-                }
+                await safeSendMessage(this.bot, numericChatId,
+                    `✅ *Tài khoản mới đã kết nối!*\n\n` +
+                    `📧 Email: \`${escapeMarkdown(authResult.email)}\`\n` +
+                    `👤 Tên: ${escapeMarkdown(authResult.name || username)}\n\n` +
+                    `🔄 Đang kích hoạt sticky rule...`,
+                    { parse_mode: 'Markdown' }
+                );
 
                 // Create sticky rule
                 try {
@@ -535,48 +559,56 @@ class OutlookTelegramBot {
                     account.ruleStats.lastEnforced = new Date();
                     await account.save();
 
-                    await this.bot.sendMessage(chatId,
-                        `✅ *Sticky Rule Active*\n\n` +
-                        `📧 eBay/Microsoft → ${forwardTarget}\n` +
-                        `🛡️ Auto-restore enabled`,
+                    await safeSendMessage(this.bot, numericChatId,
+                        `✅ *Sticky Rule Hoạt Động*\n\n` +
+                        `📧 Chuyển tiếp eBay/Microsoft → \`${escapeMarkdown(forwardTarget)}\`\n` +
+                        `🛡️ Tự động khôi phục đã bật`,
                         { parse_mode: 'Markdown' }
                     );
 
                     // Create initial backup
                     if (this.backupCommands && typeof this.backupCommands.createBackup === 'function') {
-                        await this.backupCommands.createBackup(account, msg.from.username);
+                        await this.backupCommands.createBackup(account, username);
                     }
 
                 } catch (ruleError) {
                     console.error('❌ Rule creation error:', ruleError.message);
-                    await this.bot.sendMessage(chatId,
-                        `ℹ️ Sticky rule will be created automatically within 5 minutes.`,
+                    await safeSendMessage(this.bot, numericChatId,
+                        `ℹ️ Sticky rule sẽ được kiểm tra và kích hoạt tự động trong vài phút.`,
                         { parse_mode: 'Markdown' }
                     );
                 }
             }
 
-            // Clear pending auth
-            global.pendingAuth.delete(chatId);
+            // Cleanup pending sessions
+            global.pendingAuth?.delete(numericChatId);
+            global.reconnectSessions?.delete(numericChatId);
 
             // Log success
             await Log.create({
                 accountId: account._id,
                 action: 'account_connected',
                 status: 'success',
-                message: `Connected via Telegram`,
-                details: { username: msg.from.username }
-            });
+                message: `Connected via OAuth`,
+                details: { username }
+            }).catch(() => {});
 
             // Update global stats
             global.botStats.totalAccounts = await Account.countDocuments();
 
+            return {
+                success: true,
+                email: authResult.email,
+                name: authResult.name
+            };
+
         } catch (error) {
-            console.error('❌ Auth callback error:', error);
-            await this.bot.sendMessage(chatId,
-                `❌ Authentication Failed\n\n${error.message}`,
+            console.error('❌ Auth processing error:', error);
+            await safeSendMessage(this.bot, numericChatId,
+                `❌ Lỗi kết nối tài khoản\n\n${escapeMarkdown(error.message)}`,
                 { parse_mode: 'Markdown' }
             );
+            return { success: false, error: error.message };
         }
     }
 

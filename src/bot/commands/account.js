@@ -1,8 +1,8 @@
-// src/bot/commands/account.js
 const Account = require('../../models/Account');
 const Backup = require('../../models/Backup');
 const Log = require('../../models/Log');
 const { encryptToken, decryptToken } = require('../../utils/encryption');
+const { escapeMarkdown, safeSendMessage } = require('../../utils/telegramHelper');
 
 class AccountCommands {
     constructor(bot, outlookAuth, ruleManager, blockedManager) {
@@ -23,29 +23,27 @@ class AccountCommands {
                     telegramChatId: chatId.toString()
                 });
 
-                const authUrl = this.outlookAuth.getAuthUrl();
+                const authUrl = this.outlookAuth.getAuthUrl(chatId.toString());
                 
                 global.pendingAuth = global.pendingAuth || new Map();
-                global.pendingAuth.set(chatId, {
+                global.pendingAuth.set(chatId.toString(), {
                     timestamp: Date.now(),
                     type: 'add'
                 });
 
-                await this.bot.sendMessage(chatId,
-                    '🔗 *ADD OUTLOOK ACCOUNT*\n\n' +
-                    `📊 Tổng tài khoản hiện tại: ${totalCount}\n\n` +
-                    '1️⃣ Click link\n' +
-                    '2️⃣ Login with Outlook\n' +
-                    '3️⃣ Authorize\n' +
-                    '4️⃣ Send URL here\n\n' +
-                    `[🔐 LOGIN MICROSOFT](${authUrl})`,
+                await safeSendMessage(this.bot, chatId,
+                    '🔗 *THÊM TÀI KHOẢN OUTLOOK TỰ ĐỘNG*\n\n' +
+                    `📊 Tổng tài khoản hiện có: ${totalCount}\n\n` +
+                    '1️⃣ Bấm link đăng nhập Microsoft bên dưới\n' +
+                    '2️⃣ Đăng nhập tài khoản Outlook và cấp quyền\n' +
+                    '3️⃣ Hệ thống sẽ tự động liên kết tài khoản ngay lập tức (không cần copy-paste)!\n\n' +
+                    `👉 [🔐 ĐĂNG NHẬP OUTLOOK TẠI ĐÂY](${authUrl})`,
                     { parse_mode: 'Markdown', disable_web_page_preview: true }
                 );
 
                 setTimeout(() => {
-                    if (global.pendingAuth?.has(chatId)) {
-                        global.pendingAuth.delete(chatId);
-                        this.bot.sendMessage(chatId, '⏰ Session expired. Use /add again.');
+                    if (global.pendingAuth?.has(chatId.toString())) {
+                        global.pendingAuth.delete(chatId.toString());
                     }
                 }, 300000);
 
@@ -174,7 +172,7 @@ class AccountCommands {
                         ? this.formatTimeAgo(acc.lastChecked) 
                         : 'Never';
                     
-                    message += `${i+1}. ${statusEmoji} *${acc.email}*\n`;
+                    message += `${i+1}. ${statusEmoji} *${escapeMarkdown(acc.email)}*\n`;
                     message += `   ├ Status: ${acc.status}\n`;
                     message += `   ├ Rules: ${acc.rules?.length || 0} total\n`;
                     message += `   ├ Blocked: ${acc.blockedSenders?.length || 0}\n`;
@@ -186,10 +184,10 @@ class AccountCommands {
                 if (message.length > 4000) {
                     const chunks = message.match(/[\s\S]{1,4000}/g) || [];
                     for (const chunk of chunks) {
-                        await this.bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
+                        await safeSendMessage(this.bot, chatId, chunk, { parse_mode: 'Markdown' });
                     }
                 } else {
-                    await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+                    await safeSendMessage(this.bot, chatId, message, { parse_mode: 'Markdown' });
                 }
 
             } catch (error) {
@@ -222,7 +220,7 @@ class AccountCommands {
                     const statusEmoji = acc.status === 'active' ? '✅' : 
                                        acc.status === 'reconnect_needed' ? '🔄' : '⚠️';
 
-                    let msg = `${statusEmoji} *${acc.email}*\n`;
+                    let msg = `${statusEmoji} *${escapeMarkdown(acc.email)}*\n`;
                     msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
                     
                     msg += `📊 *STATUS*\n`;
@@ -269,7 +267,7 @@ class AccountCommands {
                     msg += `├ Auto Backup: ${acc.autoBackup ? '✅' : '❌'}\n`;
                     msg += `└ Last Backup: ${acc.lastBackup ? new Date(acc.lastBackup).toLocaleString() : 'Never'}\n`;
 
-                    await this.bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+                    await safeSendMessage(this.bot, chatId, msg, { parse_mode: 'Markdown' });
                 }
 
             } catch (error) {
@@ -304,16 +302,16 @@ class AccountCommands {
                     .limit(20)
                     .lean();
 
-                let msgText = `📋 *ACCOUNT HISTORY - ${account.email}*\n\n`;
+                let msgText = `📋 *ACCOUNT HISTORY - ${escapeMarkdown(account.email)}*\n\n`;
 
                 logs.forEach(log => {
                     const time = this.formatTimeAgo(log.createdAt);
                     const emoji = log.status === 'success' ? '✅' : 
                                 log.status === 'warning' ? '⚠️' : '❌';
-                    msgText += `${emoji} ${time} - ${log.message || log.action}\n`;
+                    msgText += `${emoji} ${time} - ${escapeMarkdown(log.message || log.action)}\n`;
                 });
 
-                await this.bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
+                await safeSendMessage(this.bot, chatId, msgText, { parse_mode: 'Markdown' });
 
             } catch (error) {
                 this.bot.sendMessage(chatId, `❌ Error: ${error.message}`);
@@ -346,22 +344,22 @@ class AccountCommands {
                     );
                 }
 
-                const authUrl = this.outlookAuth.getAuthUrl();
+                const authUrl = this.outlookAuth.getAuthUrl(chatId.toString());
 
                 global.reconnectSessions = global.reconnectSessions || new Map();
-                global.reconnectSessions.set(chatId, {
+                global.reconnectSessions.set(chatId.toString(), {
                     accountId: account._id,
                     email: account.email,
                     timestamp: Date.now()
                 });
 
-                await this.bot.sendMessage(chatId,
-                    `🔄 *Reconnect Account*\n\n` +
-                    `Account: \`${email}\`\n\n` +
-                    `1. Click link below\n` +
-                    `2. Login with Microsoft\n` +
-                    `3. Send URL back here\n\n` +
-                    `[🔐 LOGIN TO RECONNECT](${authUrl})`,
+                await safeSendMessage(this.bot, chatId,
+                    `🔄 *KẾT NỐI LẠI TÀI KHOẢN TỰ ĐỘNG*\n\n` +
+                    `Tài khoản: \`${escapeMarkdown(email)}\`\n\n` +
+                    `1️⃣ Bấm link đăng nhập Microsoft bên dưới\n` +
+                    `2️⃣ Đăng nhập và xác thực tài khoản\n` +
+                    `3️⃣ Hệ thống sẽ tự động cập nhật token (không cần copy-paste)!\n\n` +
+                    `👉 [🔐 ĐĂNG NHẬP ĐỂ KẾT NỐI LẠI](${authUrl})`,
                     { 
                         parse_mode: 'Markdown', 
                         disable_web_page_preview: true 

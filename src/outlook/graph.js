@@ -9,8 +9,8 @@ class GraphClient {
     async request(method, url, data = null) {
         try {
             const config = {
-                method: method,  // ✅ YEH IMPORTANT HAI!
-                url: `${this.baseUrl}${url}`,
+                method: method,
+                url: (url.startsWith('http://') || url.startsWith('https://')) ? url : `${this.baseUrl}${url}`,
                 headers: {
                     'Authorization': `Bearer ${this.accessToken}`,
                     'Content-Type': 'application/json'
@@ -172,6 +172,59 @@ class GraphClient {
         } catch (error) {
             console.error('❌ Get recent messages error:', error.message);
             return [];
+        }
+    }
+
+    // ============= DELTA QUERY (HIGH EFFICIENCY) =============
+    /**
+     * Delta Query for Inbox messages to save 95%+ network bandwidth.
+     * Follows nextLink pages until deltaLink is reached.
+     * Returns: { messages: Array, deltaLink: string, isInitialSync: boolean, resyncRequired?: boolean }
+     */
+    async getMailDelta(deltaLink = null) {
+        try {
+            const isInitialSync = !deltaLink;
+            let currentUrl = deltaLink || 
+                `/me/mailFolders/inbox/messages/delta?$select=id,subject,from,receivedDateTime,bodyPreview,isRead`;
+
+            let messages = [];
+            let newDeltaLink = null;
+            let pageCount = 0;
+            const MAX_PAGES = 5;
+
+            while (currentUrl && pageCount < MAX_PAGES) {
+                pageCount++;
+                const response = await this.request('GET', currentUrl);
+
+                if (response.value && Array.isArray(response.value)) {
+                    messages.push(...response.value);
+                }
+
+                if (response['@odata.deltaLink']) {
+                    newDeltaLink = response['@odata.deltaLink'];
+                    break;
+                }
+
+                currentUrl = response['@odata.nextLink'] || null;
+            }
+
+            return {
+                messages,
+                deltaLink: newDeltaLink,
+                isInitialSync
+            };
+        } catch (error) {
+            const errCode = error.response?.data?.error?.code;
+            const isResyncRequired = errCode === 'resyncRequired' || error.response?.status === 410;
+            if (isResyncRequired) {
+                console.warn('⚠️ Delta token expired or resync required. Resetting delta sync.');
+                return {
+                    messages: [],
+                    deltaLink: null,
+                    resyncRequired: true
+                };
+            }
+            throw error;
         }
     }
 }

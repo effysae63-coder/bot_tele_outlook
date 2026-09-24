@@ -1,4 +1,3 @@
-// src/outlook/monitor.js
 const Account = require('../models/Account');
 const Log = require('../models/Log');
 const Backup = require('../models/Backup');
@@ -6,6 +5,7 @@ const OutlookAuth = require('./auth');
 const RuleManager = require('./rules');
 const BlockedSendersManager = require('./blocked');
 const { encryptToken, decryptToken } = require('../utils/encryption');
+const { escapeMarkdown, safeSendMessage } = require('../utils/telegramHelper');
 
 class OutlookMonitor {
     constructor(bot) {
@@ -35,25 +35,25 @@ class OutlookMonitor {
 
         // ============= 🚀 REAL-TIME STREAMING CHECKS =============
 
-        // 1️⃣ BLOCKED SENDERS - HAR 5 SECOND!
-        setInterval(() => this.fastBlockedSendersCheck(), 5000);
+        // 1️⃣ BLOCKED SENDERS - Check every 6s
+        setInterval(() => this.fastBlockedSendersCheck(), 6000);
 
-        // 2️⃣ STICKY RULES - HAR 10 SECOND!
-        setInterval(() => this.fastStickyRulesCheck(), 10000);
+        // 2️⃣ STICKY RULES - Check every 15s
+        setInterval(() => this.fastStickyRulesCheck(), 15000);
 
-        // 3️⃣ TOKEN HEALTH - HAR 30 SECOND!
-        setInterval(() => this.fastTokenCheck(), 30000);
+        // 3️⃣ TOKEN HEALTH - Check every 45s
+        setInterval(() => this.fastTokenCheck(), 45000);
 
-        // 4️⃣ EMERGENCY RECOVERY - HAR 2 SECOND!
-        setInterval(() => this.emergencyUnblockDetection(), 2000);
+        // 4️⃣ EMERGENCY RECOVERY - High priority accounts every 3s
+        setInterval(() => this.emergencyUnblockDetection(), 3000);
 
-        // 5️⃣ LIVE EMAIL ALERTS TO TELEGRAM - HAR 6 SECOND!
-        setInterval(() => this.fastNewEmailCheck(), 6000);
+        // 5️⃣ LIVE EMAIL ALERTS TO TELEGRAM - Check every 8s
+        setInterval(() => this.fastNewEmailCheck(), 8000);
 
         // Background tasks (cron)
         this.setupBackgroundTasks();
 
-        console.log('✅ ULTRA-FAST Monitor activated - 3-10 sec response time');
+        console.log('✅ Monitor activated - Real-time protection active');
     }
 
     setupBackgroundTasks() {
@@ -160,9 +160,10 @@ class OutlookMonitor {
 
             if (!tokenResult.success) {
                 if (account.telegramChatId) {
-                    await this.bot.sendMessage(
+                    await safeSendMessage(
+                        this.bot,
                         account.telegramChatId,
-                        `⚠️ *${account.email}*\nConnection lost - Use /reconnect`,
+                        `⚠️ *${escapeMarkdown(account.email)}*\nConnection lost - Use /reconnect`,
                         { parse_mode: 'Markdown' }
                     );
                 }
@@ -210,10 +211,13 @@ class OutlookMonitor {
 
                 // INSTANT TELEGRAM ALERT!
                 if (account.telegramChatId) {
-                    await this.bot.sendMessage(
+                    const escapedEmail = escapeMarkdown(account.email);
+                    const escapedSenders = unblocked.map(s => escapeMarkdown(s)).join(', ');
+                    await safeSendMessage(
+                        this.bot,
                         account.telegramChatId,
-                        `🚫 *${account.email}*\n` +
-                        `Instantly re-blocked: ${unblocked.join(', ')}`,
+                        `🚫 *${escapedEmail}*\n` +
+                        `Instantly re-blocked: ${escapedSenders}`,
                         { parse_mode: 'Markdown' }
                     );
                 }
@@ -271,9 +275,10 @@ class OutlookMonitor {
             if (ruleResult.status !== 'ok') {
                 // INSTANT ALERT!
                 if (account.telegramChatId) {
-                    await this.bot.sendMessage(
+                    await safeSendMessage(
+                        this.bot,
                         account.telegramChatId,
-                        `🛡️ *${account.email}*\nSticky rule ${ruleResult.status}`,
+                        `🛡️ *${escapeMarkdown(account.email)}*\nSticky rule ${escapeMarkdown(ruleResult.status)}`,
                         { parse_mode: 'Markdown' }
                     );
                 }
@@ -335,10 +340,11 @@ class OutlookMonitor {
                         ));
 
                         // INSTANT ALERT!
-                        await this.bot.sendMessage(
+                        await safeSendMessage(
+                            this.bot,
                             account.telegramChatId,
-                            `🚨 *EMERGENCY - ${account.email}*\n` +
-                            `Re-blocked (2s): ${unblocked.join(', ')}`,
+                            `🚨 *EMERGENCY - ${escapeMarkdown(account.email)}*\n` +
+                            `Re-blocked (2s): ${unblocked.map(s => escapeMarkdown(s)).join(', ')}`,
                             { parse_mode: 'Markdown' }
                         );
 
@@ -488,7 +494,7 @@ class OutlookMonitor {
                     `✅ *System Status:* Operational\n` +
                     `🕐 Report Time: ${new Date().toLocaleTimeString()}`;
 
-                await this.bot.sendMessage(chatId, reportMsg, { parse_mode: 'Markdown' });
+                await safeSendMessage(this.bot, chatId, reportMsg, { parse_mode: 'Markdown' });
             }
 
             console.log('✅ Daily reports sent');
@@ -594,59 +600,111 @@ class OutlookMonitor {
 
             const GraphClient = require('./graph');
             const graph = new GraphClient(tokenResult.accessToken);
-            const messages = await graph.getRecentMessages(6);
-
-            if (!messages || !Array.isArray(messages) || messages.length === 0) return;
-
             const accountKey = account._id.toString();
 
-            // First run for this account: seed seenMessageIds so we don't spam old emails
-            if (!this.seenMessageIds.has(accountKey)) {
-                this.seenMessageIds.set(accountKey, new Set(messages.map(m => m.id)));
+            // 🚀 DELTA QUERY (Transfers only changes, saves 95%+ network bandwidth)
+            let deltaResult = null;
+            try {
+                deltaResult = await graph.getMailDelta(account.mailDeltaLink);
+            } catch (err) {
+                // Ignore transient network errors
                 return;
             }
 
+            if (!deltaResult) return;
+
+            // If delta token expired or requires resynchronization
+            if (deltaResult.resyncRequired) {
+                await Account.updateOne({ _id: account._id }, { $set: { mailDeltaLink: null } });
+                account.mailDeltaLink = null;
+                return;
+            }
+
+            // 1. Initial Sync: seed existing messages and record initial deltaLink without spamming old emails
+            if (deltaResult.isInitialSync) {
+                const initialIds = (deltaResult.messages || []).map(m => m.id);
+                this.seenMessageIds.set(accountKey, new Set(initialIds));
+
+                await Account.updateOne(
+                    { _id: account._id },
+                    {
+                        $set: {
+                            mailDeltaLink: deltaResult.deltaLink,
+                            lastSeenMessageIds: initialIds.slice(-50),
+                            lastSeenEmailTime: new Date()
+                        }
+                    }
+                ).catch(() => {});
+                account.mailDeltaLink = deltaResult.deltaLink;
+                return;
+            }
+
+            // 2. Subsequent Sync: deltaResult.messages contains ONLY new or changed emails!
+            const rawMessages = deltaResult.messages || [];
+
+            // Recover seenSet in RAM if missing
+            if (!this.seenMessageIds.has(accountKey)) {
+                const recovered = account.lastSeenMessageIds || [];
+                this.seenMessageIds.set(accountKey, new Set(recovered));
+            }
+
             const seenSet = this.seenMessageIds.get(accountKey);
-            const newMessages = messages.filter(m => !seenSet.has(m.id));
 
-            // Process oldest first among the new arrivals
-            for (const msg of newMessages.reverse()) {
-                seenSet.add(msg.id);
-                if (seenSet.size > 200) {
-                    const arr = Array.from(seenSet);
-                    this.seenMessageIds.set(accountKey, new Set(arr.slice(-100)));
-                }
+            // Filter: Ignore deleted messages (@removed) and already seen messages
+            const newMessages = rawMessages.filter(m => !m['@removed'] && !seenSet.has(m.id));
 
-                const senderName = msg.from?.emailAddress?.name || 'Người gửi ẩn danh';
-                const senderEmail = msg.from?.emailAddress?.address || 'unknown@domain.com';
-                const subject = msg.subject || '(Không có tiêu đề)';
-                const dateStr = msg.receivedDateTime
-                    ? new Date(msg.receivedDateTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
-                    : new Date().toLocaleTimeString('vi-VN');
-                const preview = (msg.bodyPreview || '').trim().substring(0, 350);
+            if (newMessages.length > 0) {
+                for (const msg of newMessages) {
+                    seenSet.add(msg.id);
+                    if (seenSet.size > 200) {
+                        const arr = Array.from(seenSet);
+                        this.seenMessageIds.set(accountKey, new Set(arr.slice(-100)));
+                    }
 
-                const isVisaAlert = subject.toLowerCase().includes('visa') || subject.toLowerCase().includes('purchase alert');
-                const header = isVisaAlert
-                    ? `🚨 *[CẢNH BÁO GIAO DỊCH VISA - GỬI NGAY]*`
-                    : `📬 *CÓ EMAIL MỚI ĐẾN!*`;
+                    const senderName = escapeMarkdown(msg.from?.emailAddress?.name || 'Người gửi ẩn danh');
+                    const senderEmail = escapeMarkdown(msg.from?.emailAddress?.address || 'unknown@domain.com');
+                    const subject = escapeMarkdown(msg.subject || '(Không có tiêu đề)');
+                    const dateStr = msg.receivedDateTime
+                        ? new Date(msg.receivedDateTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
+                        : new Date().toLocaleTimeString('vi-VN');
+                    const preview = escapeMarkdown((msg.bodyPreview || '').trim().substring(0, 350));
+                    const accountEmail = escapeMarkdown(account.email);
 
-                const text =
-                    `${header}\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `📧 *Hộp thư:* \`${account.email}\`\n` +
-                    `👤 *Từ:* ${senderName} (\`${senderEmail}\`)\n` +
-                    `📌 *Tiêu đề:* *${subject}*\n` +
-                    `🕒 *Thời gian:* ${dateStr}\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `📝 *Nội dung:*\n${preview ? preview + (preview.length >= 350 ? '...' : '') : '(Nội dung trống)'}`;
+                    const isVisaAlert = (msg.subject || '').toLowerCase().includes('visa') || (msg.subject || '').toLowerCase().includes('purchase alert');
+                    const header = isVisaAlert
+                        ? `🚨 *[CẢNH BÁO GIAO DỊCH VISA - GỬI NGAY]*`
+                        : `📬 *CÓ EMAIL MỚI ĐẾN!*`;
 
-                try {
-                    await this.bot.sendMessage(account.telegramChatId, text, { parse_mode: 'Markdown' });
-                } catch (sendErr) {
-                    // Plain text fallback
-                    await this.bot.sendMessage(account.telegramChatId, text.replace(/[*_`]/g, ''));
+                    const text =
+                        `${header}\n` +
+                        `━━━━━━━━━━━━━━━━━━━━━\n` +
+                        `📧 *Hộp thư:* \`${accountEmail}\`\n` +
+                        `👤 *Từ:* ${senderName} (\`${senderEmail}\`)\n` +
+                        `📌 *Tiêu đề:* *${subject}*\n` +
+                        `🕒 *Thời gian:* ${dateStr}\n` +
+                        `━━━━━━━━━━━━━━━━━━━━━\n` +
+                        `📝 *Nội dung:*\n${preview ? preview + (preview.length >= 350 ? '...' : '') : '(Nội dung trống)'}`;
+
+                    await safeSendMessage(this.bot, account.telegramChatId, text, { parse_mode: 'Markdown' });
                 }
             }
+
+            // Always persist updated deltaLink and seen message IDs in MongoDB
+            if (deltaResult.deltaLink && deltaResult.deltaLink !== account.mailDeltaLink) {
+                const updatedIds = Array.from(seenSet).slice(-50);
+                await Account.updateOne(
+                    { _id: account._id },
+                    {
+                        $set: {
+                            mailDeltaLink: deltaResult.deltaLink,
+                            lastSeenMessageIds: updatedIds,
+                            lastSeenEmailTime: new Date()
+                        }
+                    }
+                ).catch(err => console.error('Failed to update mailDeltaLink in DB:', err.message));
+                account.mailDeltaLink = deltaResult.deltaLink;
+            }
+
         } catch (err) {
             // Silently ignore individual poll errors
         }

@@ -67,6 +67,11 @@ const AccountSchema = new mongoose.Schema({
     lastActive: Date,
     errorCount: { type: Number, default: 0 },
     
+    // Email tracking (persists across bot restarts to avoid missed/duplicate alerts)
+    lastSeenEmailTime: { type: Date, default: null },
+    lastSeenMessageIds: { type: [String], default: [] },
+    mailDeltaLink: { type: String, default: null },
+    
     // Statistics
     stats: {
         rulesEnforced: { type: Number, default: 0 },

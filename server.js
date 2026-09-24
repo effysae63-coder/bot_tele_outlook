@@ -39,33 +39,38 @@ app.get('/', (req, res) => {
     });
 });
 
+// Reference to Telegram Bot instance for OAuth callback
+let telegramBotInstance = null;
+
 // ============= AUTH CALLBACK =============
-app.get('/auth/callback', (req, res) => {
-    const { code, error, error_description } = req.query;
+app.get('/auth/callback', async (req, res) => {
+    const { code, error, error_description, state } = req.query;
     
     if (error) {
         return res.send(`
             <!DOCTYPE html>
-            <html>
+            <html lang="vi">
             <head>
-                <title>Authentication Failed</title>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Xác Thực Thất Bại</title>
                 <style>
-                    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                    .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); max-width: 600px; }
-                    h1 { color: #dc3545; margin-top: 0; }
-                    .error-box { background: #f8d7da; padding: 15px; border-radius: 5px; border: 1px solid #f5c6cb; margin: 20px 0; word-break: break-word; }
-                    button { background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+                    .container { background: #1e293b; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 500px; width: 100%; text-align: center; }
+                    h1 { color: #ef4444; margin-top: 0; font-size: 24px; }
+                    .error-box { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 15px; border-radius: 8px; margin: 20px 0; word-break: break-word; color: #fca5a5; font-size: 14px; text-align: left; }
+                    button { background: #334155; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <h1>❌ Authentication Failed</h1>
+                    <h1>❌ Xác Thực Thất Bại</h1>
                     <div class="error-box">
-                        <strong>Error:</strong> ${error}<br>
-                        <strong>Description:</strong> ${error_description || 'No description'}
+                        <strong>Lỗi:</strong> ${error}<br>
+                        <strong>Chi tiết:</strong> ${error_description || 'Không có mô tả chi tiết'}
                     </div>
-                    <p>Please copy this error and send to Telegram bot.</p>
-                    <button onclick="window.close()">Close</button>
+                    <p style="color: #94a3b8; font-size: 14px;">Vui lòng thử lại lệnh /add trên Telegram bot.</p>
+                    <button onclick="window.close()">Đóng Cửa Sổ</button>
                 </div>
             </body>
             </html>
@@ -73,37 +78,181 @@ app.get('/auth/callback', (req, res) => {
     }
     
     if (code) {
+        // If state (chatId) is provided, process OAuth automatically (Zero-Click)
+        if (state && telegramBotInstance) {
+            try {
+                console.log(`🚀 Auto-processing OAuth callback for state/chatId: ${state}`);
+                const result = await telegramBotInstance.processAuthorizationCode(code, state);
+
+                if (result.success) {
+                    return res.send(`
+                        <!DOCTYPE html>
+                        <html lang="vi">
+                        <head>
+                            <meta charset="utf-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1">
+                            <title>Kết Nối Thành Công - Outlook Bot</title>
+                            <style>
+                                * { box-sizing: border-box; }
+                                body {
+                                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                                    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                                    color: #f8fafc;
+                                    display: flex;
+                                    justify-content: center;
+                                    align-items: center;
+                                    min-height: 100vh;
+                                    margin: 0;
+                                    padding: 20px;
+                                }
+                                .card {
+                                    background: rgba(30, 41, 59, 0.9);
+                                    backdrop-filter: blur(16px);
+                                    border: 1px solid rgba(255, 255, 255, 0.1);
+                                    padding: 40px 30px;
+                                    border-radius: 20px;
+                                    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+                                    max-width: 480px;
+                                    width: 100%;
+                                    text-align: center;
+                                }
+                                .icon-wrapper {
+                                    width: 72px;
+                                    height: 72px;
+                                    background: rgba(34, 197, 94, 0.15);
+                                    border: 2px solid #22c55e;
+                                    border-radius: 50%;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    font-size: 36px;
+                                    color: #22c55e;
+                                    margin: 0 auto 20px;
+                                }
+                                h1 {
+                                    font-size: 24px;
+                                    color: #ffffff;
+                                    margin: 0 0 10px;
+                                }
+                                p {
+                                    color: #94a3b8;
+                                    font-size: 15px;
+                                    line-height: 1.5;
+                                    margin: 0 0 16px;
+                                }
+                                .badge {
+                                    display: inline-block;
+                                    background: rgba(59, 130, 246, 0.15);
+                                    color: #60a5fa;
+                                    padding: 8px 16px;
+                                    border-radius: 9999px;
+                                    font-family: monospace;
+                                    font-size: 15px;
+                                    margin-bottom: 24px;
+                                    word-break: break-all;
+                                }
+                                .features {
+                                    background: rgba(15, 23, 42, 0.6);
+                                    border-radius: 12px;
+                                    padding: 16px;
+                                    margin-bottom: 24px;
+                                    text-align: left;
+                                }
+                                .features div {
+                                    color: #cbd5e1;
+                                    font-size: 14px;
+                                    margin-bottom: 8px;
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 8px;
+                                }
+                                .features div:last-child { margin-bottom: 0; }
+                                .btn {
+                                    display: inline-block;
+                                    width: 100%;
+                                    background: #2563eb;
+                                    color: white;
+                                    font-weight: 600;
+                                    font-size: 16px;
+                                    padding: 14px;
+                                    border-radius: 10px;
+                                    border: none;
+                                    cursor: pointer;
+                                    transition: background 0.2s;
+                                }
+                                .btn:hover { background: #1d4ed8; }
+                                .timer {
+                                    font-size: 13px;
+                                    color: #64748b;
+                                    margin-top: 16px;
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="card">
+                                <div class="icon-wrapper">✓</div>
+                                <h1>Kết Nối Thành Công!</h1>
+                                <p>Tài khoản Outlook đã được liên kết với Telegram của bạn.</p>
+                                <div class="badge">${result.email}</div>
+                                <div class="features">
+                                    <div>🛡️ Sticky Rule (eBay/Microsoft) đã kích hoạt</div>
+                                    <div>🚫 Hệ thống chặn & giám sát 24/7 sẵn sàng</div>
+                                    <div>📬 Thông báo email mới sẽ gửi về Telegram</div>
+                                </div>
+                                <button class="btn" onclick="window.close()">Đóng Cửa Sổ Này</button>
+                                <div class="timer">Tab sẽ tự động đóng sau <span id="sec">5</span> giây...</div>
+                            </div>
+                            <script>
+                                let timeLeft = 5;
+                                const timerElem = document.getElementById('sec');
+                                const countdown = setInterval(() => {
+                                    timeLeft--;
+                                    if (timerElem) timerElem.innerText = timeLeft;
+                                    if (timeLeft <= 0) {
+                                        clearInterval(countdown);
+                                        window.close();
+                                    }
+                                }, 1000);
+                            </script>
+                        </body>
+                        </html>
+                    `);
+                }
+            } catch (autoErr) {
+                console.error('❌ Auto OAuth processing error:', autoErr);
+            }
+        }
+
+        // Fallback for manual URL copy (if state is absent or legacy flow)
         res.send(`
             <!DOCTYPE html>
-            <html>
+            <html lang="vi">
             <head>
-                <title>Authentication Successful</title>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Xác Thực Thành Công</title>
                 <style>
-                    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                    .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); max-width: 800px; text-align: center; }
-                    h1 { color: #28a745; margin-top: 0; }
-                    .success-icon { color: #28a745; font-size: 64px; margin-bottom: 20px; }
-                    .code-box { background: #f8f9fa; padding: 20px; border-radius: 5px; border: 1px solid #dee2e6; margin: 20px 0; word-break: break-all; font-family: monospace; font-size: 12px; text-align: left; }
-                    button { background: #007bff; color: white; border: none; padding: 12px 30px; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
-                    button:hover { background: #0056b3; }
-                    .note { color: #6c757d; margin-top: 20px; font-size: 14px; }
+                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+                    .container { background: #1e293b; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 600px; width: 100%; text-align: center; }
+                    h1 { color: #22c55e; margin-top: 0; font-size: 24px; }
+                    .code-box { background: #0f172a; padding: 15px; border-radius: 8px; border: 1px solid #334155; margin: 20px 0; word-break: break-all; font-family: monospace; font-size: 12px; text-align: left; color: #94a3b8; }
+                    button { background: #2563eb; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; margin: 5px; }
+                    button:hover { background: #1d4ed8; }
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <div class="success-icon">✅</div>
-                    <h1>Authentication Successful!</h1>
-                    <p>Your Outlook account has been authorized.</p>
-                    <p style="color: #6c757d;">Copy the FULL URL below and send it to the Telegram bot:</p>
+                    <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+                    <h1>Xác Thực Thành Công!</h1>
+                    <p style="color: #94a3b8;">Sao chép toàn bộ đường dẫn bên dưới và dán vào bot Telegram:</p>
                     <div class="code-box" id="urlText">${req.protocol}://${req.get('host')}${req.originalUrl}</div>
-                    <button onclick="copyUrl()">📋 Copy URL</button>
-                    <button onclick="window.close()">✖ Close</button>
-                    <p class="note">Return to Telegram bot and paste the URL to complete connection.</p>
+                    <button onclick="copyUrl()">📋 Sao chép URL</button>
+                    <button onclick="window.close()" style="background: #334155;">Đóng</button>
                     <script>
                         function copyUrl() {
                             const url = document.getElementById('urlText').innerText;
                             navigator.clipboard.writeText(url);
-                            alert('✅ URL copied to clipboard!');
+                            alert('Đã sao chép URL vào khay nhớ tạm!');
                         }
                     </script>
                 </div>
@@ -113,21 +262,22 @@ app.get('/auth/callback', (req, res) => {
     } else {
         res.send(`
             <!DOCTYPE html>
-            <html>
+            <html lang="vi">
             <head>
-                <title>Error</title>
+                <meta charset="utf-8">
+                <title>Thiếu Mã Xác Thực</title>
                 <style>
-                    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                    .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); max-width: 600px; text-align: center; }
-                    h1 { color: #dc3545; }
+                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+                    .container { background: #1e293b; padding: 40px; border-radius: 16px; max-width: 500px; text-align: center; }
+                    h1 { color: #ef4444; }
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <h1>❌ No Authorization Code</h1>
-                    <p>No authorization code was received from Microsoft.</p>
-                    <p>Please try again using /add command in Telegram.</p>
-                    <button onclick="window.close()" style="padding: 10px 20px; margin-top: 20px;">Close</button>
+                    <h1>❌ Không Có Mã Xác Thực</h1>
+                    <p style="color: #94a3b8;">Không nhận được mã ủy quyền từ Microsoft.</p>
+                    <p style="color: #94a3b8;">Vui lòng thử lại bằng lệnh /add trên Telegram.</p>
+                    <button onclick="window.close()" style="padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; background: #334155; color: white;">Đóng</button>
                 </div>
             </body>
             </html>
@@ -137,7 +287,7 @@ app.get('/auth/callback', (req, res) => {
 
 // ============= ERROR HANDLER =============
 app.use((err, req, res, next) => {
-    console.error('❌ Server error:', err.stack);
+    console.error(' Server error:', err.stack);
     res.status(500).json({
         success: false,
         message: 'Internal server error',
@@ -150,7 +300,7 @@ const startServer = async () => {
     try {
         // 1. Connect to MongoDB
         await connectDB();
-        console.log('✅ MongoDB Connected');
+        console.log(' MongoDB Connected');
 
         // 2. Start Express server
         const server = app.listen(PORT, () => {
@@ -161,7 +311,8 @@ const startServer = async () => {
         // 3. Start Telegram Bot
         const telegramBot = new OutlookTelegramBot();
         telegramBot.start();
-        console.log('✅ Telegram Bot started');
+        telegramBotInstance = telegramBot;
+        console.log(' Telegram Bot started');
 
         // 4. Start Outlook Monitor (24/7)
         const outlookMonitor = new OutlookMonitor(telegramBot.bot);

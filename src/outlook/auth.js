@@ -43,14 +43,18 @@ class OutlookAuth {
         ];
     }
 
-    getAuthUrl() {
-        return `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/authorize?` +
+    getAuthUrl(state = '') {
+        let url = `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/authorize?` +
             `client_id=${this.clientId}&` +
             `response_type=code&` +
             `redirect_uri=${encodeURIComponent(this.redirectUri)}&` +
             `response_mode=query&` +
             `scope=${encodeURIComponent(this.scopes.join(' '))}&` +
             `prompt=select_account`;
+        if (state) {
+            url += `&state=${encodeURIComponent(state)}`;
+        }
+        return url;
     }
 
     async getTokenFromCode(code) {
