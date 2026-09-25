@@ -147,42 +147,64 @@ class OutlookAuth {
         }
     }
 
-async refreshAccessToken(refreshToken, force = false) {
-    try {
-        
-        const tokenUrl = `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/token`;
-        
-        const params = new URLSearchParams({
-            client_id: this.clientId,
-            client_secret: this.clientSecret,
-            refresh_token: refreshToken,
-            grant_type: 'refresh_token',
-            scope: this.scopes.join(' ')
-        });
-
-        const response = await axios.post(tokenUrl, params, {
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
+    async refreshAccessToken(refreshToken, force = false) {
+        const clientsToTry = [
+            { id: this.clientId, secret: this.clientSecret },
+            { 
+                id: process.env.LEGACY_AZURE_CLIENT_ID || '51f894d6-64ec-4231-89bd-f2f5f7fb613c', 
+                secret: process.env.LEGACY_AZURE_CLIENT_SECRET 
             }
-        });
+        ];
 
+        let lastError = null;
 
-        return {
-            success: true,
-            accessToken: response.data.access_token,
-            refreshToken: response.data.refresh_token || refreshToken,
-            expiresIn: response.data.expires_in
-        };
-    } catch (error) {
-        console.error('❌ Refresh error:', error.response?.data || error.message);
+        for (const client of clientsToTry) {
+            if (!client.id || !client.secret) continue;
+
+            try {
+                const tokenUrl = `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/token`;
+                const params = new URLSearchParams({
+                    client_id: client.id,
+                    client_secret: client.secret,
+                    refresh_token: refreshToken,
+                    grant_type: 'refresh_token',
+                    scope: this.scopes.join(' ')
+                });
+
+                const response = await axios.post(tokenUrl, params, {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    timeout: 15000
+                });
+
+                return {
+                    success: true,
+                    accessToken: response.data.access_token,
+                    refreshToken: response.data.refresh_token || refreshToken,
+                    expiresIn: response.data.expires_in,
+                    clientId: client.id
+                };
+            } catch (error) {
+                lastError = error;
+                const desc = error.response?.data?.error_description || '';
+                // If token was issued to a different client id, continue to try fallback client
+                if (desc.includes('different client id') || desc.includes('issued for a different client')) {
+                    continue;
+                }
+                // For other errors (e.g. revoked token, invalid password), break early
+                break;
+            }
+        }
+
+        console.error('❌ Refresh error:', lastError?.response?.data || lastError?.message);
         return {
             success: false,
-            error: error.response?.data?.error_description || error.message,
-            errorCode: error.response?.data?.error,
-            status: error.response?.status
+            error: lastError?.response?.data?.error_description || lastError?.message,
+            errorCode: lastError?.response?.data?.error,
+            status: lastError?.response?.status
         };
     }
-}
 }
 
 module.exports = OutlookAuth;

@@ -159,13 +159,27 @@ class OutlookMonitor {
             const tokenResult = await this.getValidAccessToken(account);
 
             if (!tokenResult.success) {
-                if (account.telegramChatId) {
-                    await safeSendMessage(
-                        this.bot,
-                        account.telegramChatId,
-                        `⚠️ *${escapeMarkdown(account.email)}*\nConnection lost - Use /reconnect`,
-                        { parse_mode: 'Markdown' }
-                    );
+                // Throttle alert to at most once per 12 hours per account
+                const alertKey = `${account._id}_reconnect_alert`;
+                const lastAlert = this.lastCheck.get(alertKey) || 0;
+                const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+
+                if (Date.now() - lastAlert > TWELVE_HOURS) {
+                    this.lastCheck.set(alertKey, Date.now());
+                    await Account.updateOne(
+                        { _id: account._id },
+                        { $set: { status: 'reconnect_needed' } }
+                    ).catch(() => {});
+                    account.status = 'reconnect_needed';
+
+                    if (account.telegramChatId) {
+                        await safeSendMessage(
+                            this.bot,
+                            account.telegramChatId,
+                            `⚠️ *${escapeMarkdown(account.email)}*\nConnection lost - Use /reconnect`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
                 }
                 return;
             }
