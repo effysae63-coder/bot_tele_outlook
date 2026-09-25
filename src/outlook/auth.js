@@ -171,6 +171,8 @@ class OutlookAuth {
             clientsToTry.push({ id: currentId, secret: currentSecret });
         }
 
+        console.error(`[REFRESH INIT] legacyId: ${legacyId?.slice(0, 8)}, hasLegacySec: ${Boolean(legacySecret)}, currentId: ${currentId?.slice(0, 8)}, hasCurSec: ${Boolean(currentSecret)}, clientsCount: ${clientsToTry.length}`);
+
         let lastError = null;
 
         for (const client of clientsToTry) {
@@ -186,7 +188,7 @@ class OutlookAuth {
                     scope: this.scopes.join(' ')
                 });
 
-                console.log(`[REFRESH ATTEMPT] client: ${client.id.slice(0, 8)}... (total: ${clientsToTry.length}), tokenPrefix: ${refreshToken?.slice(0, 10)}`);
+                console.error(`[REFRESH ATTEMPT] client: ${client.id.slice(0, 8)}... (total: ${clientsToTry.length}), tokenPrefix: ${refreshToken?.slice(0, 10)}`);
 
                 const response = await axios.post(tokenUrl, params, {
                     headers: {
@@ -195,7 +197,7 @@ class OutlookAuth {
                     timeout: 15000
                 });
 
-                console.log(`[REFRESH SUCCESS] client: ${client.id.slice(0, 8)}...`);
+                console.error(`[REFRESH SUCCESS] client: ${client.id.slice(0, 8)}...`);
 
                 return {
                     success: true,
@@ -207,7 +209,7 @@ class OutlookAuth {
             } catch (error) {
                 lastError = error;
                 const desc = error.response?.data?.error_description || '';
-                console.log(`[REFRESH FAILED] client: ${client.id.slice(0, 8)}: ${desc.slice(0, 120)}`);
+                console.error(`[REFRESH FAILED] client: ${client.id.slice(0, 8)}: ${desc.slice(0, 120)}`);
                 // If token was issued to a different client id, continue to try next client
                 if (desc.includes('different client id') || desc.includes('issued for a different client')) {
                     continue;
