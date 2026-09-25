@@ -19,7 +19,7 @@ class OutlookAuth {
         
         let uri = (process.env.REDIRECT_URI || '').trim();
         if (!uri) {
-            uri = 'https://outlook-telegram-bot-production.up.railway.app/auth/callback';
+            uri = 'https://bot-outlook-production.up.railway.app/auth/callback';
         } else {
             if (!uri.startsWith('http://') && !uri.startsWith('https://')) {
                 uri = `https://${uri}`;
