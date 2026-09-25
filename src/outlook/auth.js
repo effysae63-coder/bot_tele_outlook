@@ -186,12 +186,16 @@ class OutlookAuth {
                     scope: this.scopes.join(' ')
                 });
 
+                console.log(`[REFRESH ATTEMPT] client: ${client.id.slice(0, 8)}... (total: ${clientsToTry.length}), tokenPrefix: ${refreshToken?.slice(0, 10)}`);
+
                 const response = await axios.post(tokenUrl, params, {
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     timeout: 15000
                 });
+
+                console.log(`[REFRESH SUCCESS] client: ${client.id.slice(0, 8)}...`);
 
                 return {
                     success: true,
@@ -203,7 +207,7 @@ class OutlookAuth {
             } catch (error) {
                 lastError = error;
                 const desc = error.response?.data?.error_description || '';
-                console.log(`[Token Refresh] Client ${client.id.slice(0, 8)} failed: ${desc.slice(0, 100)}`);
+                console.log(`[REFRESH FAILED] client: ${client.id.slice(0, 8)}: ${desc.slice(0, 120)}`);
                 // If token was issued to a different client id, continue to try next client
                 if (desc.includes('different client id') || desc.includes('issued for a different client')) {
                     continue;
