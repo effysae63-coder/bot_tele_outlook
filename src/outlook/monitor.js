@@ -82,16 +82,20 @@ class OutlookMonitor {
                 telegramChatId: { $exists: true }
             }).lean();
 
-            for (const account of accounts) {
-                // Skip if checked within last 3 seconds
-                const lastCheck = this.lastCheck.get(`${account._id}_blocked`) || 0;
-                if (Date.now() - lastCheck < 3000) continue;
+            const BATCH_SIZE = 15;
+            for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
+                const batch = accounts.slice(i, i + BATCH_SIZE);
+                await Promise.all(batch.map(async account => {
+                    const lastCheck = this.lastCheck.get(`${account._id}_blocked`) || 0;
+                    if (Date.now() - lastCheck < 3000) return;
+                    this.lastCheck.set(`${account._id}_blocked`, Date.now());
 
-                this.fastCheckSingleAccount(account).catch(err =>
-                    console.error(`Fast check failed ${account.email}:`, err.message)
-                );
-
-                this.lastCheck.set(`${account._id}_blocked`, Date.now());
+                    try {
+                        await this.fastCheckSingleAccount(account);
+                    } catch (err) {
+                        console.error(`Fast check failed ${account.email}:`, err.message);
+                    }
+                }));
             }
         } catch (error) {
             console.error('❌ Fast blocked senders error:', error.message);
@@ -597,10 +601,12 @@ class OutlookMonitor {
                 telegramChatId: { $exists: true }
             }).lean();
 
-            for (const account of accounts) {
-                this.checkAccountNewEmails(account).catch(err => {
-                    // Suppress network jitter errors
-                });
+            const BATCH_SIZE = 15;
+            for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
+                const batch = accounts.slice(i, i + BATCH_SIZE);
+                await Promise.all(batch.map(account =>
+                    this.checkAccountNewEmails(account).catch(() => {})
+                ));
             }
         } catch (error) {
             console.error('❌ Fast new email check error:', error.message);
