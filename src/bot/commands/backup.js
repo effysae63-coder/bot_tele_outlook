@@ -51,7 +51,7 @@ class BackupCommands {
 
                     for (let i = 0; i < accounts.length; i++) {
                         try {
-                            await this.createBackup(accounts[i], msg.from.username);
+                            await this.createBackup(accounts[i], msg.from?.username || msg.from?.first_name || 'User');
                             success++;
                         } catch (err) {
                             console.error(`Backup failed for ${accounts[i].email}:`, err.message);
@@ -98,7 +98,7 @@ class BackupCommands {
                         { parse_mode: 'Markdown' }
                     );
 
-                    const backup = await this.createBackup(account, msg.from.username);
+                    const backup = await this.createBackup(account, msg.from?.username || msg.from?.first_name || 'User');
 
                     await this.bot.sendMessage(chatId,
                         `✅ *Backup Created*\n\n` +
@@ -328,7 +328,7 @@ class BackupCommands {
                     },
                     type: 'snapshot',
                     metadata: {
-                        createdBy: msg.from.username,
+                        createdBy: msg.from?.username || msg.from?.first_name || 'User',
                         reason: 'snapshot',
                         ruleCount: rules.length,
                         blockedCount: blocked.length

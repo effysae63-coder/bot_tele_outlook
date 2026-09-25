@@ -93,9 +93,12 @@ class RuleManager {
     }
 
     validateStickyRule(rule) {
+        const targetEmail = (this.TARGET_EMAIL || '').trim().toLowerCase();
+        const ruleTargetEmail = (rule.actions?.forwardTo?.[0]?.emailAddress?.address || '').trim().toLowerCase();
+
         const hasCorrectActions = 
             rule.actions?.delete === true &&
-            rule.actions?.forwardTo?.[0]?.emailAddress?.address === this.TARGET_EMAIL &&
+            ruleTargetEmail === targetEmail &&
             rule.actions?.markAsRead === true &&
             rule.actions?.stopProcessingRules === true;
 

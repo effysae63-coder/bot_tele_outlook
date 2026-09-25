@@ -96,7 +96,7 @@ class AccountCommands {
                         timestamp: new Date()
                     },
                     type: 'manual',
-                    metadata: { createdBy: msg.from.username, reason: 'account_removal' }
+                    metadata: { createdBy: msg.from?.username || msg.from?.first_name || 'User', reason: 'account_removal' }
                 });
 
                 await Account.deleteOne({ _id: account._id });

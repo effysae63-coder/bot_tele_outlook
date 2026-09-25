@@ -107,6 +107,7 @@ const AccountSchema = new mongoose.Schema({
 // Indexes for faster queries
 AccountSchema.index({ status: 1 });
 AccountSchema.index({ telegramChatId: 1 });
+AccountSchema.index({ status: 1, telegramChatId: 1 });
 AccountSchema.index({ updatedAt: 1 });
 
 // Update timestamps on save

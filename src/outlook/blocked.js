@@ -50,7 +50,6 @@ class BlockedSendersManager {
                         ],
                         // 🗑️ DELETE from inbox!
                         delete: true,
-                        moveToDeletedItems: true,
                         markAsRead: true,
                         stopProcessingRules: true
                     }
@@ -75,7 +74,6 @@ class BlockedSendersManager {
                         ],
                         // 🗑️ DELETE from inbox!
                         delete: true,
-                        moveToDeletedItems: true,
                         markAsRead: true,
                         stopProcessingRules: true
                     }

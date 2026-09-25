@@ -55,6 +55,9 @@ const LogSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Compound index for fast report filtering
+LogSchema.index({ accountId: 1, createdAt: -1 });
+
 // TTL index - auto delete after 30 days
 LogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 2592000 });
 

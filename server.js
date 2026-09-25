@@ -39,6 +39,16 @@ app.get('/', (req, res) => {
     });
 });
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Reference to Telegram Bot instance for OAuth callback
 let telegramBotInstance = null;
 
@@ -66,8 +76,8 @@ app.get('/auth/callback', async (req, res) => {
                 <div class="container">
                     <h1>❌ Xác Thực Thất Bại</h1>
                     <div class="error-box">
-                        <strong>Lỗi:</strong> ${error}<br>
-                        <strong>Chi tiết:</strong> ${error_description || 'Không có mô tả chi tiết'}
+                        <strong>Lỗi:</strong> ${escapeHtml(error)}<br>
+                        <strong>Chi tiết:</strong> ${escapeHtml(error_description || 'Không có mô tả chi tiết')}
                     </div>
                     <p style="color: #94a3b8; font-size: 14px;">Vui lòng thử lại lệnh /add trên Telegram bot.</p>
                     <button onclick="window.close()">Đóng Cửa Sổ</button>
@@ -193,7 +203,7 @@ app.get('/auth/callback', async (req, res) => {
                                 <div class="icon-wrapper">✓</div>
                                 <h1>Kết Nối Thành Công!</h1>
                                 <p>Tài khoản Outlook đã được liên kết với Telegram của bạn.</p>
-                                <div class="badge">${result.email}</div>
+                                <div class="badge">${escapeHtml(result.email)}</div>
                                 <div class="features">
                                     <div>🛡️ Sticky Rule (eBay/Microsoft) đã kích hoạt</div>
                                     <div>🚫 Hệ thống chặn & giám sát 24/7 sẵn sàng</div>
@@ -245,7 +255,7 @@ app.get('/auth/callback', async (req, res) => {
                     <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
                     <h1>Xác Thực Thành Công!</h1>
                     <p style="color: #94a3b8;">Sao chép toàn bộ đường dẫn bên dưới và dán vào bot Telegram:</p>
-                    <div class="code-box" id="urlText">${req.protocol}://${req.get('host')}${req.originalUrl}</div>
+                    <div class="code-box" id="urlText">${escapeHtml(`${req.protocol}://${req.get('host')}${req.originalUrl}`)}</div>
                     <button onclick="copyUrl()">📋 Sao chép URL</button>
                     <button onclick="window.close()" style="background: #334155;">Đóng</button>
                     <script>
