@@ -148,13 +148,18 @@ class OutlookAuth {
     }
 
     async refreshAccessToken(refreshToken, force = false) {
-        const clientsToTry = [
-            { id: this.clientId, secret: this.clientSecret },
-            { 
-                id: process.env.LEGACY_AZURE_CLIENT_ID || '51f894d6-64ec-4231-89bd-f2f5f7fb613c', 
-                secret: process.env.LEGACY_AZURE_CLIENT_SECRET 
-            }
-        ];
+        const legacyId = (process.env.LEGACY_AZURE_CLIENT_ID || '51f894d6-64ec-4231-89bd-f2f5f7fb613c').trim();
+        const legacySecret = (process.env.LEGACY_AZURE_CLIENT_SECRET || '').trim();
+
+        const clientsToTry = [];
+        // 1. Try legacy client first (matches 100% of existing accounts)
+        if (legacyId && legacySecret) {
+            clientsToTry.push({ id: legacyId, secret: legacySecret });
+        }
+        // 2. Try current client next (matches new accounts added via /add)
+        if (this.clientId && this.clientSecret && this.clientId.trim() !== legacyId) {
+            clientsToTry.push({ id: this.clientId.trim(), secret: this.clientSecret.trim() });
+        }
 
         let lastError = null;
 
@@ -188,7 +193,7 @@ class OutlookAuth {
             } catch (error) {
                 lastError = error;
                 const desc = error.response?.data?.error_description || '';
-                // If token was issued to a different client id, continue to try fallback client
+                // If token was issued to a different client id, continue to try next client
                 if (desc.includes('different client id') || desc.includes('issued for a different client')) {
                     continue;
                 }
