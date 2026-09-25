@@ -161,6 +161,10 @@ class OutlookAuth {
             clientsToTry.push({ id: this.clientId.trim(), secret: this.clientSecret.trim() });
         }
 
+        if (clientsToTry.length === 0) {
+            console.error('❌ No OAuth clients configured for refresh! legacySecret:', !!legacySecret, 'clientSecret:', !!this.clientSecret);
+        }
+
         let lastError = null;
 
         for (const client of clientsToTry) {
@@ -193,6 +197,7 @@ class OutlookAuth {
             } catch (error) {
                 lastError = error;
                 const desc = error.response?.data?.error_description || '';
+                console.log(`[Token Refresh] Client ${client.id.slice(0, 8)} failed: ${desc.slice(0, 100)}`);
                 // If token was issued to a different client id, continue to try next client
                 if (desc.includes('different client id') || desc.includes('issued for a different client')) {
                     continue;
