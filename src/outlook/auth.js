@@ -164,6 +164,7 @@ class OutlookAuth {
         const clientsToTry = [];
         // 1. Try legacy client first (matches 100% of existing accounts)
         if (legacyId && legacySecret) {
+            clientsToTry.push({ id: '9e5f94bc-e8a4-4e73-b8be-63364c29d753', secret: null });
             clientsToTry.push({ id: legacyId, secret: legacySecret });
         }
         // 2. Try current client next (matches new accounts added via /add)
@@ -176,17 +177,20 @@ class OutlookAuth {
         let lastError = null;
 
         for (const client of clientsToTry) {
-            if (!client.id || !client.secret) continue;
+            if (!client.id) continue;
 
             try {
                 const tokenUrl = `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/token`;
-                const params = new URLSearchParams({
+                const paramsData = {
                     client_id: client.id,
-                    client_secret: client.secret,
                     refresh_token: refreshToken,
                     grant_type: 'refresh_token',
                     scope: this.scopes.join(' ')
-                });
+                };
+                if (client.secret) {
+                    paramsData.client_secret = client.secret;
+                }
+                const params = new URLSearchParams(paramsData);
 
                 console.error(`[REFRESH ATTEMPT] client: ${client.id.slice(0, 8)}... (total: ${clientsToTry.length}), tokenPrefix: ${refreshToken?.slice(0, 10)}`);
 
