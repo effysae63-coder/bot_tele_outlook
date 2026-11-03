@@ -184,8 +184,7 @@ class OutlookAuth {
                 const paramsData = {
                     client_id: client.id,
                     refresh_token: refreshToken,
-                    grant_type: 'refresh_token',
-                    scope: this.scopes.join(' ')
+                    grant_type: 'refresh_token'
                 };
                 if (client.secret) {
                     paramsData.client_secret = client.secret;
