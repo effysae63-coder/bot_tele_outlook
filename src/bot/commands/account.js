@@ -386,22 +386,38 @@ class AccountCommands {
                     );
                 }
 
-                const authUrl = this.outlookAuth.getAuthUrl(chatId.toString());
+                // Try automatic refresh token recovery first
+                const decryptedRt = decryptToken(account.refreshToken);
+                if (decryptedRt) {
+                    const refreshRes = await this.outlookAuth.refreshAccessToken(decryptedRt);
+                    if (refreshRes.success && refreshRes.accessToken) {
+                        account.accessToken = encryptToken(refreshRes.accessToken);
+                        account.refreshToken = encryptToken(refreshRes.refreshToken || decryptedRt);
+                        account.tokenExpiry = new Date(Date.now() + (refreshRes.expiresIn || 3600) * 1000);
+                        account.status = 'active';
+                        await account.save();
 
-                global.reconnectSessions = global.reconnectSessions || new Map();
-                global.reconnectSessions.set(chatId.toString(), {
-                    accountId: account._id,
-                    email: account.email,
-                    timestamp: Date.now()
-                });
+                        return safeSendMessage(this.bot, chatId,
+                            `✅ *Kết nối lại tự động thành công!*\n\n📧 Tài khoản: \`${escapeMarkdown(email)}\`\n🟢 Trạng thái: Active (Microsoft Graph)`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
+                }
+
+                const username = msg.from?.username || msg.from?.first_name || 'User';
+                const deviceData = this.telegramBot
+                    ? await this.telegramBot.createAndStartDeviceLogin(chatId.toString(), username)
+                    : await this.outlookAuth.requestDeviceCode();
+
+                const renderBase = (process.env.RENDER_EXTERNAL_URL || 'https://bot-tele-outlook.onrender.com').replace(/\/+$/, '');
+                const renderLoginUrl = `${renderBase}/login/${chatId}`;
 
                 await safeSendMessage(this.bot, chatId,
-                    `🔄 *KẾT NỐI LẠI TÀI KHOẢN TỰ ĐỘNG*\n\n` +
-                    `Tài khoản: \`${escapeMarkdown(email)}\`\n\n` +
-                    `1️⃣ Bấm link đăng nhập Microsoft bên dưới\n` +
-                    `2️⃣ Đăng nhập và xác thực tài khoản\n` +
-                    `3️⃣ Copy đường dẫn URL trên thanh địa chỉ trình duyệt (có chữ code=...) rồi dán gửi vào bot!\n\n` +
-                    `👉 [🔐 ĐĂNG NHẬP ĐỂ KẾT NỐI LẠI](${authUrl})`,
+                    `🔄 *KẾT NỐI LẠI TÀI KHOẢN QUA RENDER*\n\n` +
+                    `Tài khoản: \`${escapeMarkdown(email)}\`\n` +
+                    `🔑 Mã xác thực: \`${deviceData.userCode}\`\n\n` +
+                    `👉 [🌐 ĐĂNG NHẬP QUA TRANG RENDER](${renderLoginUrl})\n` +
+                    `👉 [🔐 HOẶC MỞ TRỰC TIẾP MICROSOFT](${deviceData.verificationUri})`,
                     { 
                         parse_mode: 'Markdown', 
                         disable_web_page_preview: true 

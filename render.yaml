@@ -28,3 +28,4 @@ services:
         value: "10000"
       - key: REDIRECT_URI
         sync: false
+

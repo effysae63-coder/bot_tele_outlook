@@ -399,6 +399,10 @@ const startServer = async () => {
         // 1. Connect to MongoDB
         await connectDB();
         console.log(' MongoDB Connected');
+        try {
+            const Account = require('./src/models/Account');
+            global.botStats.totalAccounts = await Account.countDocuments();
+        } catch (e) {}
 
         // 2. Start Express server
         const server = app.listen(PORT, () => {

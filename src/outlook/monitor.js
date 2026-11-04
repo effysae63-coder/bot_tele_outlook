@@ -262,15 +262,18 @@ class OutlookMonitor {
         }
     }
 
-    // ============= 🚀 10-SECOND STICKY RULES CHECK =============
+    // ============= 🚀 15-SECOND STICKY RULES CHECK =============
     async fastStickyRulesCheck() {
         try {
+            const threshold = new Date(Date.now() - 15000);
             const accounts = await Account.find({
                 status: 'active',
-                'ruleStats.lastChecked': {
-                    $lt: new Date(Date.now() - 10000) // 10 sec ago
-                }
-            }).limit(50); // Process 50 at a time for speed
+                $or: [
+                    { 'ruleStats.lastChecked': null },
+                    { 'ruleStats.lastChecked': { $exists: false } },
+                    { 'ruleStats.lastChecked': { $lt: threshold } }
+                ]
+            }).limit(30);
 
             await Promise.all(accounts.map(account =>
                 this.fastRuleCheck(account).catch(err =>
@@ -292,8 +295,14 @@ class OutlookMonitor {
                 account._id
             );
 
-            if (ruleResult.status !== 'ok') {
-                // INSTANT ALERT!
+            if (global.botStats) {
+                global.botStats.rulesToday = (global.botStats.rulesToday || 0) + 1;
+            }
+
+            if (ruleResult.status === 'restored') {
+                if (global.botStats) {
+                    global.botStats.rulesRestored = (global.botStats.rulesRestored || 0) + 1;
+                }
                 if (account.telegramChatId) {
                     await safeSendMessage(
                         this.bot,
@@ -304,13 +313,14 @@ class OutlookMonitor {
                 }
             }
 
-            // FAST UPDATE
+            const now = new Date();
             await Account.updateOne(
                 { _id: account._id },
                 {
                     $set: {
-                        lastChecked: new Date(),
-                        'ruleStats.lastEnforced': new Date(),
+                        lastChecked: now,
+                        'ruleStats.lastChecked': now,
+                        'ruleStats.lastEnforced': now,
                         'ruleStats.enforceCount': (account.ruleStats?.enforceCount || 0) + 1
                     }
                 }
