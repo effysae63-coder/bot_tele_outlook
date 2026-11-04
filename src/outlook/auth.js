@@ -13,8 +13,8 @@ function decodeJwt(token) {
 
 class OutlookAuth {
     constructor() {
-        this.clientId = process.env.AZURE_CLIENT_ID;
-        this.clientSecret = process.env.AZURE_CLIENT_SECRET;
+        this.clientId = (process.env.AZURE_CLIENT_ID || 'ca488bde-1848-4c85-a070-92f9297a0a52').trim();
+        this.clientSecret = (process.env.AZURE_CLIENT_SECRET || '').trim();
         this.tenant = process.env.AZURE_TENANT_ID || 'common';
         
         let uri = (process.env.REDIRECT_URI || '').trim();
