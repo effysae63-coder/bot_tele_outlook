@@ -18,7 +18,7 @@ class OutlookAuth {
         this.tenant = process.env.AZURE_TENANT_ID || 'common';
         
         let uri = (process.env.REDIRECT_URI || '').trim();
-        if (!uri) {
+        if (!uri || this.clientId === 'ca488bde-1848-4c85-a070-92f9297a0a52') {
             uri = 'https://bot-outlook-production.up.railway.app/auth/callback';
         } else {
             if (!uri.startsWith('http://') && !uri.startsWith('https://')) {

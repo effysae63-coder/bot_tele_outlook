@@ -36,7 +36,7 @@ class AccountCommands {
                     `📊 Tổng tài khoản hiện có: ${totalCount}\n\n` +
                     '1️⃣ Bấm link đăng nhập Microsoft bên dưới\n' +
                     '2️⃣ Đăng nhập tài khoản Outlook và cấp quyền\n' +
-                    '3️⃣ Hệ thống sẽ tự động liên kết tài khoản ngay lập tức (không cần copy-paste)!\n\n' +
+                    '3️⃣ Copy đường dẫn URL trên thanh địa chỉ trình duyệt (có chữ code=...) rồi dán gửi vào bot!\n\n' +
                     `👉 [🔐 ĐĂNG NHẬP OUTLOOK TẠI ĐÂY](${authUrl})`,
                     { parse_mode: 'Markdown', disable_web_page_preview: true }
                 );
@@ -335,7 +335,7 @@ class AccountCommands {
                     `Tài khoản: \`${escapeMarkdown(email)}\`\n\n` +
                     `1️⃣ Bấm link đăng nhập Microsoft bên dưới\n` +
                     `2️⃣ Đăng nhập và xác thực tài khoản\n` +
-                    `3️⃣ Hệ thống sẽ tự động cập nhật token (không cần copy-paste)!\n\n` +
+                    `3️⃣ Copy đường dẫn URL trên thanh địa chỉ trình duyệt (có chữ code=...) rồi dán gửi vào bot!\n\n` +
                     `👉 [🔐 ĐĂNG NHẬP ĐỂ KẾT NỐI LẠI](${authUrl})`,
                     { 
                         parse_mode: 'Markdown', 
