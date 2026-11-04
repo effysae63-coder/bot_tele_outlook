@@ -57,7 +57,7 @@ class OutlookTelegramBot {
         };
 
         // Initialize command modules
-        this.accountCommands = new AccountCommands(this.bot, this.outlookAuth, this.ruleManager, this.blockedManager);
+        this.accountCommands = new AccountCommands(this.bot, this.outlookAuth, this.ruleManager, this.blockedManager, this);
         this.ruleCommands = new RuleCommands(this.bot, this.outlookAuth, this.ruleManager);
         this.senderCommands = new SenderCommands(this.bot, this.outlookAuth, this.blockedManager, this.ruleManager);
         this.backupCommands = new BackupCommands(this.bot, this.outlookAuth, this.ruleManager, this.blockedManager);
@@ -447,6 +447,67 @@ class OutlookTelegramBot {
                 );
                 return { success: false, error: authResult.error };
             }
+            return await this.saveAuthenticatedAccount(authResult, numericChatId, username);
+        } catch (error) {
+            console.error('❌ Auth processing error:', error);
+            await safeSendMessage(this.bot, numericChatId, `❌ Lỗi kết nối tài khoản\n\n${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
+            return { success: false, error: error.message };
+        }
+    }
+
+    async createAndStartDeviceLogin(chatId, username = null) {
+        const deviceData = await this.outlookAuth.requestDeviceCode();
+        this.startDevicePolling(deviceData, chatId, username);
+        return deviceData;
+    }
+
+    startDevicePolling(deviceData, chatId, username = null) {
+        const numericChatId = chatId.toString();
+        global.activeDeviceCodes = global.activeDeviceCodes || new Map();
+        const existing = global.activeDeviceCodes.get(numericChatId);
+        if (existing && existing.timer) clearInterval(existing.timer);
+
+        const session = {
+            ...deviceData,
+            chatId: numericChatId,
+            status: 'pending',
+            email: null,
+            createdAt: Date.now()
+        };
+
+        const pollIntervalMs = Math.max((deviceData.interval || 5) * 1000, 4000);
+        const maxTimeMs = (deviceData.expiresIn || 900) * 1000;
+
+        session.timer = setInterval(async () => {
+            if (Date.now() - session.createdAt > maxTimeMs) {
+                clearInterval(session.timer);
+                session.status = 'expired';
+                return;
+            }
+            try {
+                const res = await this.outlookAuth.pollDeviceCodeOnce(deviceData.deviceCode);
+                if (res.pending) return;
+                clearInterval(session.timer);
+                if (res.success) {
+                    session.status = 'completed';
+                    session.email = res.email;
+                    await this.saveAuthenticatedAccount(res, numericChatId, username);
+                } else {
+                    session.status = 'failed';
+                    session.error = res.error;
+                }
+            } catch (e) {
+                console.error('Device poll error:', e.message);
+            }
+        }, pollIntervalMs);
+
+        global.activeDeviceCodes.set(numericChatId, session);
+        return session;
+    }
+
+    async saveAuthenticatedAccount(authResult, numericChatId, username = null) {
+        numericChatId = numericChatId.toString();
+        try {
 
             // Get Telegram username if not provided
             if (!username) {

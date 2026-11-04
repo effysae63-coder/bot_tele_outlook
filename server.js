@@ -52,6 +52,94 @@ function escapeHtml(str) {
 // Reference to Telegram Bot instance for OAuth callback
 let telegramBotInstance = null;
 
+
+// ============= RENDER DIRECT DEVICE LOGIN =============
+app.get('/login/status/:chatId', (req, res) => {
+    const session = global.activeDeviceCodes?.get(String(req.params.chatId));
+    if (!session) return res.json({ status: 'none' });
+    res.json({
+        status: session.status,
+        userCode: session.userCode,
+        email: session.email || null,
+        error: session.error || null
+    });
+});
+
+app.get('/login/:chatId', async (req, res) => {
+    const chatId = String(req.params.chatId);
+    try {
+        let session = global.activeDeviceCodes?.get(chatId);
+        if (!session || session.status !== 'pending' || (Date.now() - session.createdAt > 600000)) {
+            if (telegramBotInstance) {
+                await telegramBotInstance.createAndStartDeviceLogin(chatId);
+                session = global.activeDeviceCodes?.get(chatId);
+            }
+        }
+        const userCode = session?.userCode || '---';
+        const verifyUri = session?.verificationUri || 'https://www.microsoft.com/link';
+
+        res.send(`<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Đăng Nhập Outlook - Render</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .card { background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); padding: 36px 28px; border-radius: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); max-width: 460px; width: 100%; text-align: center; }
+        h1 { font-size: 22px; margin: 0 0 10px; color: #fff; }
+        p { color: #94a3b8; font-size: 14px; line-height: 1.5; margin: 0 0 20px; }
+        .code-box { background: #0f172a; border: 2px dashed #38bdf8; border-radius: 12px; padding: 18px; font-size: 32px; font-weight: 800; letter-spacing: 4px; color: #38bdf8; margin-bottom: 20px; user-select: all; cursor: pointer; }
+        .btn { display: block; width: 100%; background: #2563eb; color: #fff; font-weight: 600; font-size: 16px; padding: 14px 20px; border-radius: 12px; text-decoration: none; border: none; cursor: pointer; margin-bottom: 12px; transition: background 0.2s; }
+        .btn:hover { background: #1d4ed8; }
+        .status { margin-top: 16px; padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.05); font-size: 14px; color: #cbd5e1; }
+        .success { background: rgba(34, 197, 94, 0.2); border: 1px solid #22c55e; color: #4ade80; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="card" id="mainCard">
+        <h1>🔐 Kết Nối Tài Khoản Outlook</h1>
+        <p>Bấm nút bên dưới để tự động Copy mã và mở trang xác thực Microsoft:</p>
+        <div class="code-box" id="codeBox" onclick="copyCode()">${escapeHtml(userCode)}</div>
+        <button class="btn" onclick="copyAndOpen()">📋 Copy Mã & Mở Đăng Nhập Microsoft</button>
+        <div class="status" id="statusBox">⏳ Đang chờ bạn đăng nhập trên Microsoft... (Tự động cập nhật)</div>
+    </div>
+    <script>
+        const code = "${escapeHtml(userCode)}";
+        const verifyUrl = "${escapeHtml(verifyUri)}";
+        const chatId = "${escapeHtml(chatId)}";
+
+        function copyCode() {
+            navigator.clipboard.writeText(code);
+            document.getElementById('statusBox').innerText = '✅ Đã copy mã ' + code + '! Hãy dán vào trang Microsoft.';
+        }
+
+        function copyAndOpen() {
+            navigator.clipboard.writeText(code).catch(() => {});
+            window.open(verifyUrl, '_blank');
+            document.getElementById('statusBox').innerText = '✅ Đã copy mã ' + code + '! Hãy dán mã vào tab Microsoft vừa mở.';
+        }
+
+        setInterval(async () => {
+            try {
+                const r = await fetch('/login/status/' + chatId);
+                const d = await r.json();
+                if (d.status === 'completed') {
+                    const box = document.getElementById('statusBox');
+                    box.className = 'status success';
+                    box.innerHTML = '🎉 ĐĂNG NHẬP THÀNH CÔNG!<br>Đã kết nối: ' + (d.email || 'Outlook') + '<br>Bạn có thể đóng trang này và quay lại Telegram.';
+                }
+            } catch (e) {}
+        }, 2500);
+    </script>
+</body>
+</html>`);
+    } catch (err) {
+        res.status(500).send('Error: ' + escapeHtml(err.message));
+    }
+});
+
 // ============= AUTH CALLBACK =============
 app.get('/auth/callback', async (req, res) => {
     const { code, error, error_description, state } = req.query;

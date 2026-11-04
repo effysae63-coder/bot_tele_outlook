@@ -5,11 +5,12 @@ const { encryptToken, decryptToken } = require('../../utils/encryption');
 const { escapeMarkdown, safeSendMessage } = require('../../utils/telegramHelper');
 
 class AccountCommands {
-    constructor(bot, outlookAuth, ruleManager, blockedManager) {
+    constructor(bot, outlookAuth, ruleManager, blockedManager, telegramBot = null) {
         this.bot = bot;
         this.outlookAuth = outlookAuth;
         this.ruleManager = ruleManager;
         this.blockedManager = blockedManager;
+        this.telegramBot = telegramBot;
         this.setupCommands();
     }
 
@@ -17,35 +18,31 @@ class AccountCommands {
         // ============= ADD ACCOUNT =============
         this.bot.onText(/\/add/, async (msg) => {
             const chatId = msg.chat.id;
+            const username = msg.from?.username || msg.from?.first_name || 'User';
             
             try {
                 const totalCount = await Account.countDocuments({
                     telegramChatId: chatId.toString()
                 });
 
-                const authUrl = this.outlookAuth.getAuthUrl(chatId.toString());
-                
-                global.pendingAuth = global.pendingAuth || new Map();
-                global.pendingAuth.set(chatId.toString(), {
-                    timestamp: Date.now(),
-                    type: 'add'
-                });
+                const deviceData = this.telegramBot
+                    ? await this.telegramBot.createAndStartDeviceLogin(chatId.toString(), username)
+                    : await this.outlookAuth.requestDeviceCode();
+
+                const renderBase = (process.env.RENDER_EXTERNAL_URL || 'https://bot-tele-outlook.onrender.com').replace(/\/+$/, '');
+                const renderLoginUrl = `${renderBase}/login/${chatId}`;
 
                 await safeSendMessage(this.bot, chatId,
-                    '🔗 *THÊM TÀI KHOẢN OUTLOOK TỰ ĐỘNG*\n\n' +
+                    '🔗 *THÊM TÀI KHOẢN OUTLOOK (TRỰC TIẾP QUA RENDER)*\n\n' +
                     `📊 Tổng tài khoản hiện có: ${totalCount}\n\n` +
-                    '1️⃣ Bấm link đăng nhập Microsoft bên dưới\n' +
-                    '2️⃣ Đăng nhập tài khoản Outlook và cấp quyền\n' +
-                    '3️⃣ Copy đường dẫn URL trên thanh địa chỉ trình duyệt (có chữ code=...) rồi dán gửi vào bot!\n\n' +
-                    `👉 [🔐 ĐĂNG NHẬP OUTLOOK TẠI ĐÂY](${authUrl})`,
+                    `🔑 Mã xác thực (chạm để copy): ` + `\`${deviceData.userCode}\`\n\n` +
+                    '1️⃣ Copy mã xác thực ở trên\n' +
+                    '2️⃣ Bấm nút bên dưới để mở trang đăng nhập và dán mã\n' +
+                    '3️⃣ Đăng nhập Outlook & bấm *Accept/Đồng ý* → Hệ thống trên Render sẽ *tự động lưu tài khoản ngay lập tức* (không cần copy link)!\n\n' +
+                    `👉 [🌐 ĐĂNG NHẬP QUA TRANG RENDER](${renderLoginUrl})\n` +
+                    `👉 [🔐 HOẶC MỞ TRỰC TIẾP MICROSOFT](${deviceData.verificationUri})`,
                     { parse_mode: 'Markdown', disable_web_page_preview: true }
                 );
-
-                setTimeout(() => {
-                    if (global.pendingAuth?.has(chatId.toString())) {
-                        global.pendingAuth.delete(chatId.toString());
-                    }
-                }, 300000);
 
             } catch (error) {
                 this.bot.sendMessage(chatId, `❌ Error: ${error.message}`);
