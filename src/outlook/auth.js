@@ -14,9 +14,6 @@ function decodeJwt(token) {
 const PUBLIC_CLIENT_ID = '9e5f94bc-e8a4-4e73-b8be-63364c29d753';
 const GRAPH_SCOPES = [
     'offline_access',
-    'openid',
-    'profile',
-    'email',
     'https://graph.microsoft.com/User.Read',
     'https://graph.microsoft.com/Mail.ReadWrite',
     'https://graph.microsoft.com/Mail.Send',
