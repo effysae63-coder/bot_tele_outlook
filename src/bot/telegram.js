@@ -90,6 +90,7 @@ class OutlookTelegramBot {
                 '📧 *ACCOUNT & EMAIL MANAGEMENT*\n' +
                 '├ /inbox - Xem các email gần nhất\n' +
                 '├ /add - Thêm tài khoản Outlook\n' +
+                '├ /addall - Thêm hàng loạt từ file .txt\n' +
                 '├ /remove [email] - Xóa tài khoản\n' +
                 '├ /list - Danh sách tài khoản\n' +
                 '├ /status [email] - Trạng thái tài khoản\n' +

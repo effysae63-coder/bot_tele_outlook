@@ -1,3 +1,4 @@
+const axios = require('axios');
 const Account = require('../../models/Account');
 const Backup = require('../../models/Backup');
 const Log = require('../../models/Log');
@@ -16,7 +17,7 @@ class AccountCommands {
 
     setupCommands() {
         // ============= ADD ACCOUNT =============
-        this.bot.onText(/\/add/, async (msg) => {
+        this.bot.onText(/^\/add(?:@\w+)?$/, async (msg) => {
             const chatId = msg.chat.id;
             const username = msg.from?.username || msg.from?.first_name || 'User';
             
@@ -46,6 +47,73 @@ class AccountCommands {
 
             } catch (error) {
                 this.bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+            }
+        });
+
+        // ============= ADD ALL ACCOUNTS (BULK FILE / TEXT) =============
+        this.bot.onText(/^\/addall(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
+            const chatId = msg.chat.id;
+            const username = msg.from?.username || msg.from?.first_name || 'User';
+            const inlineContent = match?.[1]?.trim();
+
+            if (inlineContent) {
+                return this.processBulkAccountsText(chatId, username, inlineContent);
+            }
+
+            global.pendingAddAll = global.pendingAddAll || new Set();
+            global.pendingAddAll.add(chatId.toString());
+
+            await safeSendMessage(this.bot, chatId,
+                '📂 *THÊM HÀNG LOẠT TÀI KHOẢN OUTLOOK (/addall)*\n\n' +
+                'Vui lòng **gửi file `.txt`** chứa danh sách mail (hoặc dán trực tiếp các dòng tài khoản vào khung chat) theo định dạng:\n' +
+                '`email|password|refresh_token|client_id`\n' +
+                '*(hoặc `email|refresh_token`)*\n\n' +
+                '⚡ Hệ thống sẽ tự động lấy **Microsoft Graph Token** và nạp toàn bộ tài khoản cho bạn!',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // Handle uploaded .txt document for /addall
+        this.bot.on('document', async (msg) => {
+            const chatId = msg.chat.id;
+            const username = msg.from?.username || msg.from?.first_name || 'User';
+            const doc = msg.document;
+            if (!doc) return;
+
+            const isTxt = (doc.file_name && doc.file_name.toLowerCase().endsWith('.txt')) ||
+                          (doc.mime_type && doc.mime_type.includes('text/plain'));
+            const isCaptionAddAll = msg.caption && msg.caption.includes('/addall');
+            const isPending = global.pendingAddAll?.has(chatId.toString());
+
+            if (!isTxt && !isCaptionAddAll && !isPending) return;
+
+            global.pendingAddAll?.delete(chatId.toString());
+
+            try {
+                await safeSendMessage(this.bot, chatId, `📥 Đang tải file *${escapeMarkdown(doc.file_name || 'accounts.txt')}*...`, { parse_mode: 'Markdown' });
+                const fileUrl = await this.bot.getFileLink(doc.file_id);
+                const response = await axios.get(fileUrl, { responseType: 'text', timeout: 30000 });
+                const content = typeof response.data === 'string' ? response.data : String(response.data || '');
+                await this.processBulkAccountsText(chatId, username, content);
+            } catch (error) {
+                console.error('❌ Bulk file upload error:', error.message);
+                await safeSendMessage(this.bot, chatId, `❌ Lỗi khi đọc file: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
+            }
+        });
+
+        // Handle pasted bulk account lines after /addall
+        this.bot.on('text', async (msg) => {
+            const chatId = msg.chat.id;
+            const text = (msg.text || '').trim();
+            if (!text || text.startsWith('/')) return;
+
+            const isPending = global.pendingAddAll?.has(chatId.toString());
+            const looksLikeBulkLine = text.includes('@') && text.includes('|') && text.includes('M.');
+
+            if (isPending || looksLikeBulkLine) {
+                global.pendingAddAll?.delete(chatId.toString());
+                const username = msg.from?.username || msg.from?.first_name || 'User';
+                await this.processBulkAccountsText(chatId, username, text);
             }
         });
 
@@ -365,6 +433,110 @@ class AccountCommands {
         if (hours < 24) return `${hours}h ago`;
         const days = Math.floor(hours / 24);
         return `${days}d ago`;
+    }
+
+    // ============= BULK IMPORT PROCESSOR (/addall) =============
+    async processBulkAccountsText(chatId, username, rawText) {
+        const numericChatId = chatId.toString();
+        const lines = String(rawText || '')
+            .split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l && l.includes('@') && l.includes('|'));
+
+        if (lines.length === 0) {
+            return safeSendMessage(
+                this.bot,
+                chatId,
+                '❌ Không tìm thấy dòng tài khoản hợp lệ nào trong dữ liệu bạn gửi.\n\nĐịnh dạng chuẩn:\n`email|password|refresh_token|client_id`',
+                { parse_mode: 'Markdown' }
+            );
+        }
+
+        await safeSendMessage(
+            this.bot,
+            chatId,
+            `⏳ Đang kiểm tra và lấy **Microsoft Graph Token** cho *${lines.length}* tài khoản... Vui lòng đợi trong giây lát!`,
+            { parse_mode: 'Markdown' }
+        );
+
+        let successCount = 0;
+        let failCount = 0;
+        const BATCH_SIZE = 20;
+
+        for (let i = 0; i < lines.length; i += BATCH_SIZE) {
+            const batch = lines.slice(i, i + BATCH_SIZE);
+            await Promise.all(batch.map(async (line) => {
+                const parts = line.split('|').map(p => p.trim()).filter(Boolean);
+                if (parts.length < 2) {
+                    failCount++;
+                    return;
+                }
+
+                const emailPart = parts.find(p => p.includes('@')) || parts[0];
+                const email = emailPart.toLowerCase();
+                const tokenPart = parts.find(p => p.startsWith('M.') || p.length > 50) || (parts.length >= 3 ? parts[2] : parts[1]);
+
+                if (!email || !tokenPart) {
+                    failCount++;
+                    return;
+                }
+
+                try {
+                    const res = await this.outlookAuth.refreshAccessToken(tokenPart);
+                    if (!res.success || !res.accessToken) {
+                        failCount++;
+                        return;
+                    }
+
+                    await Account.findOneAndUpdate(
+                        { email },
+                        {
+                            $set: {
+                                email,
+                                refreshToken: encryptToken(res.refreshToken || tokenPart),
+                                accessToken: encryptToken(res.accessToken),
+                                tokenExpiry: new Date(Date.now() + (res.expiresIn || 3600) * 1000),
+                                status: 'active',
+                                telegramChatId: numericChatId,
+                                telegramUsername: username,
+                                stickyRules: ['Sticky_eBay_Microsoft_Rule'],
+                                autoBackup: true
+                            },
+                            $setOnInsert: {
+                                stats: { rulesEnforced: 0, rulesRestored: 0, sendersBlocked: 0, emailsForwarded: 0 },
+                                ruleStats: { enforceCount: 0, restoreCount: 0, lastEnforced: null, lastRestored: null, lastChecked: null },
+                                rules: [],
+                                blockedSenders: [],
+                                forwardRules: []
+                            }
+                        },
+                        { upsert: true, new: true }
+                    );
+                    successCount++;
+                } catch (e) {
+                    failCount++;
+                }
+            }));
+        }
+
+        const totalActive = await Account.countDocuments({
+            telegramChatId: numericChatId,
+            status: 'active'
+        });
+        if (global.botStats) {
+            global.botStats.totalAccounts = await Account.countDocuments();
+        }
+
+        await safeSendMessage(
+            this.bot,
+            chatId,
+            `✅ *HOÀN TẤT THÊM TÀI KHOẢN (/addall)*\n\n` +
+            `📂 Tổng số tài khoản trong file: *${lines.length}*\n` +
+            `🟢 Thành công (Microsoft Graph): *${successCount}*\n` +
+            `🔴 Lỗi / Token hết hạn: *${failCount}*\n` +
+            `📊 Tổng tài khoản đang Active: *${totalActive}*`,
+            { parse_mode: 'Markdown' }
+        );
     }
 
     // ============= HELPER METHODS =============
