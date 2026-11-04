@@ -224,7 +224,8 @@ class OutlookAuth {
         ).trim();
 
         const clientsToTry = [
-            { id: PUBLIC_CLIENT_ID, secret: null, scope: GRAPH_SCOPES.join(' ') }
+            { id: PUBLIC_CLIENT_ID, secret: null, scope: GRAPH_SCOPES.join(' ') },
+            { id: PUBLIC_CLIENT_ID, secret: null, scope: 'https://graph.microsoft.com/.default' }
         ];
         // 1. Try legacy client
         if (legacyId && legacySecret) {
@@ -275,7 +276,12 @@ class OutlookAuth {
                 lastError = error;
                 const desc = error.response?.data?.error_description || '';
                 console.error(`[REFRESH FAILED] client: ${client.id.slice(0, 8)}: ${desc.slice(0, 120)}`);
-                if (desc.includes('different client id') || desc.includes('issued for a different client')) {
+                if (
+                    desc.includes('different client id') ||
+                    desc.includes('issued for a different client') ||
+                    desc.includes('AADSTS70000') ||
+                    desc.includes('scopes requested are unauthorized')
+                ) {
                     continue;
                 }
                 break;
