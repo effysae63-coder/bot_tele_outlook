@@ -613,13 +613,15 @@ class OutlookMonitor {
 
     // ============= 📬 REAL-TIME EMAIL NOTIFICATIONS TO TELEGRAM =============
     async fastNewEmailCheck() {
+        if (this.isCheckingNewEmails) return;
+        this.isCheckingNewEmails = true;
         try {
             const accounts = await Account.find({
                 status: 'active',
                 telegramChatId: { $exists: true }
             }).lean();
 
-            const BATCH_SIZE = 15;
+            const BATCH_SIZE = 25;
             for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
                 const batch = accounts.slice(i, i + BATCH_SIZE);
                 await Promise.all(batch.map(account =>
@@ -628,6 +630,8 @@ class OutlookMonitor {
             }
         } catch (error) {
             console.error('❌ Fast new email check error:', error.message);
+        } finally {
+            this.isCheckingNewEmails = false;
         }
     }
 
@@ -640,56 +644,55 @@ class OutlookMonitor {
             const graph = new GraphClient(tokenResult.accessToken);
             const accountKey = account._id.toString();
 
-            // 🚀 DELTA QUERY (Transfers only changes, saves 95%+ network bandwidth)
-            let deltaResult = null;
-            try {
-                deltaResult = await graph.getMailDelta(account.mailDeltaLink);
-            } catch (err) {
-                // Ignore transient network errors
-                return;
-            }
+            // Fetch top 5 newest messages across all folders in 1 fast API call (never gets stuck on large inboxes)
+            const recentMessages = await graph.getRecentMessages(5);
+            if (!Array.isArray(recentMessages)) return;
 
-            if (!deltaResult) return;
-
-            // If delta token expired or requires resynchronization
-            if (deltaResult.resyncRequired) {
-                await Account.updateOne({ _id: account._id }, { $set: { mailDeltaLink: null } });
-                account.mailDeltaLink = null;
-                return;
-            }
-
-            // 1. Initial Sync: seed existing messages and record initial deltaLink without spamming old emails
-            if (deltaResult.isInitialSync) {
-                const initialIds = (deltaResult.messages || []).map(m => m.id);
-                this.seenMessageIds.set(accountKey, new Set(initialIds));
-
-                await Account.updateOne(
-                    { _id: account._id },
-                    {
-                        $set: {
-                            mailDeltaLink: deltaResult.deltaLink,
-                            lastSeenMessageIds: initialIds.slice(-50),
-                            lastSeenEmailTime: new Date()
-                        }
-                    }
-                ).catch(() => {});
-                account.mailDeltaLink = deltaResult.deltaLink;
-                return;
-            }
-
-            // 2. Subsequent Sync: deltaResult.messages contains ONLY new or changed emails!
-            const rawMessages = deltaResult.messages || [];
+            const isFirstBaseline = !account.lastSeenEmailTime && !this.seenMessageIds.has(accountKey);
 
             // Recover seenSet in RAM if missing
             if (!this.seenMessageIds.has(accountKey)) {
                 const recovered = account.lastSeenMessageIds || [];
                 this.seenMessageIds.set(accountKey, new Set(recovered));
             }
-
             const seenSet = this.seenMessageIds.get(accountKey);
 
-            // Filter: Ignore deleted messages (@removed) and already seen messages
-            const newMessages = rawMessages.filter(m => !m['@removed'] && !seenSet.has(m.id));
+            // If this account has never been baseline-synced before, seed existing older emails
+            // (but still alert if an email literally just arrived within the last 60 seconds!)
+            if (isFirstBaseline) {
+                const nowMs = Date.now();
+                for (const m of recentMessages) {
+                    const msgTime = m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : 0;
+                    if (nowMs - msgTime > 60000) {
+                        seenSet.add(m.id);
+                    }
+                }
+                const seedIds = Array.from(seenSet).slice(-50);
+                const nowDate = new Date();
+                await Account.updateOne(
+                    { _id: account._id },
+                    {
+                        $set: {
+                            lastSeenMessageIds: seedIds,
+                            lastSeenEmailTime: nowDate
+                        }
+                    }
+                ).catch(() => {});
+                account.lastSeenEmailTime = nowDate;
+                account.lastSeenMessageIds = seedIds;
+            }
+
+            const baselineMs = account.lastSeenEmailTime
+                ? new Date(account.lastSeenEmailTime).getTime() - 120000 // 2-min buffer for clock skew
+                : Date.now() - 120000;
+
+            const newMessages = recentMessages
+                .filter(m => {
+                    if (!m || !m.id || seenSet.has(m.id)) return false;
+                    const msgTime = m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : Date.now();
+                    return msgTime >= baselineMs;
+                })
+                .reverse(); // Send oldest-to-newest
 
             if (newMessages.length > 0) {
                 for (const msg of newMessages) {
@@ -725,29 +728,25 @@ class OutlookMonitor {
 
                     await safeSendMessage(this.bot, account.telegramChatId, text, { parse_mode: 'Markdown' });
                 }
-            }
 
-            // Always persist updated deltaLink and seen message IDs in MongoDB
-            if (deltaResult.deltaLink && deltaResult.deltaLink !== account.mailDeltaLink) {
-                const updatedIds = Array.from(seenSet).slice(-50);
+                const updatedIds = Array.from(this.seenMessageIds.get(accountKey)).slice(-50);
+                const latestTime = new Date();
                 await Account.updateOne(
                     { _id: account._id },
                     {
                         $set: {
-                            mailDeltaLink: deltaResult.deltaLink,
                             lastSeenMessageIds: updatedIds,
-                            lastSeenEmailTime: new Date()
+                            lastSeenEmailTime: latestTime
                         }
                     }
-                ).catch(err => console.error('Failed to update mailDeltaLink in DB:', err.message));
-                account.mailDeltaLink = deltaResult.deltaLink;
+                ).catch(() => {});
+                account.lastSeenEmailTime = latestTime;
+                account.lastSeenMessageIds = updatedIds;
             }
-
         } catch (err) {
             // Silently ignore individual poll errors
         }
     }
-
 }
 
 module.exports = OutlookMonitor;

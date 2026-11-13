@@ -192,7 +192,7 @@ class GraphClient {
         try {
             const response = await this.request(
                 'GET',
-                `/me/mailFolders/inbox/messages?$top=${limit}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead`
+                `/me/messages?$top=${limit}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead`
             );
             return response.value || [];
         } catch (error) {
