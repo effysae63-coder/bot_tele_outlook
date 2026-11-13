@@ -711,15 +711,30 @@ class OutlookMonitor {
                     const preview = escapeMarkdown((msg.bodyPreview || '').trim().substring(0, 350));
                     const accountEmail = escapeMarkdown(account.email);
 
-                    const isVisaAlert = (msg.subject || '').toLowerCase().includes('visa') || (msg.subject || '').toLowerCase().includes('purchase alert');
-                    const header = isVisaAlert
-                        ? `🚨 *[CẢNH BÁO GIAO DỊCH VISA - GỬI NGAY]*`
-                        : `📬 *CÓ EMAIL MỚI ĐẾN!*`;
+                    const rawCombined = `${msg.subject || ''} ${msg.bodyPreview || ''}`;
+                    const isVisaAlert = /visa|purchase alert|card ending in/i.test(rawCombined);
+                    const visaCardMatch = rawCombined.match(/Visa card ending in\s*\(?(\d{4})\)?/i) || rawCombined.match(/on Card\s*\(?(\d{4})\)?/i);
+                    const visaCardNum = visaCardMatch ? visaCardMatch[1] : null;
+                    const isVisaDeclined = isVisaAlert && /declined/i.test(rawCombined);
+
+                    let header = `📬 *CÓ EMAIL MỚI ĐẾN!*`;
+                    let cardLine = '';
+                    if (isVisaAlert) {
+                        if (isVisaDeclined) {
+                            header = `❌ *[VISA BỊ TỪ CHỐI - DECLINED]*`;
+                        } else {
+                            header = `✅ *[VISA GIAO DỊCH THÀNH CÔNG - KHÔNG DECLINED]*`;
+                        }
+                        if (visaCardNum) {
+                            cardLine = `💳 *Số thẻ (4 số cuối):* \`${visaCardNum}\` (${isVisaDeclined ? '❌ DECLINED' : '🟢 USED ONLINE/PHONE'})\n`;
+                        }
+                    }
 
                     const text =
                         `${header}\n` +
                         `━━━━━━━━━━━━━━━━━━━━━\n` +
                         `📧 *Hộp thư:* \`${accountEmail}\`\n` +
+                        cardLine +
                         `👤 *Từ:* ${senderName} (\`${senderEmail}\`)\n` +
                         `📌 *Tiêu đề:* *${subject}*\n` +
                         `🕒 *Thời gian:* ${dateStr}\n` +

