@@ -421,7 +421,12 @@ const startServer = async () => {
         outlookMonitor.start();
         console.log('✅ Outlook Monitor started - 24/7 active');
 
-        // 5. Update global stats periodically
+        // 5. Update global stats periodically & RENDER KEEP-ALIVE
+        const axios = require('axios');
+        setInterval(() => {
+            const extUrl = process.env.RENDER_EXTERNAL_URL || 'https://bot-tele-outlook.onrender.com';
+            axios.get(extUrl, { timeout: 10000 }).catch(() => {});
+        }, 10 * 60 * 1000);
         setInterval(async () => {
             try {
                 const Account = require('./src/models/Account');
