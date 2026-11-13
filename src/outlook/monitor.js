@@ -747,6 +747,24 @@ class OutlookMonitor {
                         }
                         if (visaCardNum) {
                             cardLine = `💳 *Số thẻ (4 số cuối):* \`${visaCardNum}\` (${isVisaDeclined ? '❌ DECLINED' : '🟢 USED ONLINE/PHONE'})\n`;
+                            if (!isVisaDeclined && /was recently used/i.test(rawCombined)) {
+                                global.visaResultsCache = global.visaResultsCache || [];
+                                let entry = global.visaResultsCache.find(r => r.email === account.email);
+                                if (!entry) {
+                                    entry = { email: account.email, cards: [] };
+                                    global.visaResultsCache.unshift(entry);
+                                }
+                                const existingCard = entry.cards.find(c => c.card === visaCardNum);
+                                if (existingCard) {
+                                    existingCard.time = msg.receivedDateTime || new Date().toISOString();
+                                } else {
+                                    entry.cards.unshift({
+                                        card: visaCardNum,
+                                        time: msg.receivedDateTime || new Date().toISOString(),
+                                        neverDeclined: true
+                                    });
+                                }
+                            }
                         }
                     }
 

