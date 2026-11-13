@@ -70,11 +70,12 @@ class SenderCommands {
 
             try {
                 if (args[0] === 'off') {
-                    const sender = args[1];
-                    if (!sender) {
+                    const rawSender = args[1];
+                    if (!rawSender) {
                         return this.bot.sendMessage(chatId, '❌ Please specify sender to disable forwarding for.');
                     }
-                    await this.disableForward(chatId, sender);
+                    const [senderPart, targetPart] = rawSender.split('|');
+                    await this.disableForward(chatId, senderPart, targetPart || args[2] || null);
                 } else {
                     const sender = args[0];
                     const targetEmail = args[1] || this.TARGET_EMAIL;
@@ -266,7 +267,7 @@ class SenderCommands {
                     failed++;
                 }
 
-                if ((i + 1) % 3 === 0 || i === accounts.length - 1) {
+                if ((i + 1) % 20 === 0 || i === accounts.length - 1) {
                     await this.bot.editMessageText(
                         `🚫 *Blocking \`${blockTarget}\`*\n` +
                         `✅ Success: ${success}/${accounts.length}\n` +
@@ -276,7 +277,7 @@ class SenderCommands {
                             message_id: statusMsg.message_id,
                             parse_mode: 'Markdown'
                         }
-                    );
+                    ).catch(() => {});
                 }
             }
 
@@ -360,7 +361,7 @@ class SenderCommands {
                     failed++;
                 }
 
-                if ((i + 1) % 3 === 0 || i === accounts.length - 1) {
+                if ((i + 1) % 20 === 0 || i === accounts.length - 1) {
                     await this.bot.editMessageText(
                         `✅ *Unblocking \`${unblockTarget}\`*\n` +
                         `✅ Success: ${success}/${accounts.length}\n` +
@@ -370,7 +371,7 @@ class SenderCommands {
                             message_id: statusMsg.message_id,
                             parse_mode: 'Markdown'
                         }
-                    );
+                    ).catch(() => {});
                 }
             }
 
@@ -425,13 +426,7 @@ const rule = {
     sequence: 999,
     isEnabled: true,
     conditions: {
-        from: {  // ✅ More reliable than subjectContains!
-            emailAddresses: [
-                {
-                    address: sender
-                }
-            ]
-        }
+        senderContains: [sender]
     },
     actions: {
         forwardTo: [
@@ -541,7 +536,9 @@ async disableForward(chatId, sender, targetEmail = null) {
                 }
 
                 for (const rule of rulesToRemove) {
-                    const ruleName = `Forward_${sender.replace(/[@.]/g, '_')}_to_${rule.targetEmail.replace(/[@.]/g, '_')}`;
+                    const cleanSender = sender.replace(/[@.]/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+                    const cleanTarget = rule.targetEmail.replace(/[@.]/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+                    const ruleName = `Forward_${cleanSender}_to_${cleanTarget}`;
                     try {
                         await this.ruleManager.removeRule(tokenResult.accessToken, ruleName);
                         removedRules.push(`${sender} → ${rule.targetEmail}`);

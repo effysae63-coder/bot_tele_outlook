@@ -182,7 +182,7 @@ if (conditions.length === 0) {
                     displayName: ruleName,
                     sequence: 100,
                     isEnabled: true,
-                    conditions: conditions.length > 0 ? conditions[0] : {},
+                    conditions: Object.assign({}, ...conditions),
                     actions: {}
                 };
 

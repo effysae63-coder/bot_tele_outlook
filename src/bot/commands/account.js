@@ -181,60 +181,23 @@ class AccountCommands {
             }
         });
 
-        // ============= LIST ACCOUNTS =============
-        this.bot.onText(/\/list/, async (msg) => {
+        // ============= LIST ACCOUNTS (PAGINATED) =============
+        this.bot.onText(/^\/list(?:@\w+)?(?:\s+(\d+))?$/, async (msg, match) => {
             const chatId = msg.chat.id;
-            
+            const page = Math.max(1, parseInt(match?.[1] || '1', 10));
+            await this.sendAccountsListPage(chatId, page);
+        });
+
+        this.bot.on('callback_query', async (query) => {
             try {
-                const accounts = await Account.find({ 
-                    telegramChatId: chatId.toString() 
-                }).sort({ createdAt: -1 }).lean();
-
-                if (accounts.length === 0) {
-                    return this.bot.sendMessage(chatId,
-                        '📭 *No accounts*\nUse /add to connect your first Outlook account.',
-                        { parse_mode: 'Markdown' }
-                    );
-                }
-
-                let message = '📊 *YOUR ACCOUNTS*\n\n';
-                message += `━━━━━━━━━━━━━━━━━━━━━\n`;
-                message += `📧 Total: ${accounts.length}\n`;
-                message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-                for (let i = 0; i < accounts.length; i++) {
-                    const acc = accounts[i];
-                    
-                    let statusEmoji = '✅';
-                    if (acc.status === 'reconnect_needed') statusEmoji = '🔄';
-                    if (acc.status === 'expired') statusEmoji = '⚠️';
-                    if (acc.status === 'error') statusEmoji = '❌';
-                    
-                    const lastCheck = acc.lastChecked 
-                        ? this.formatTimeAgo(acc.lastChecked) 
-                        : 'Never';
-                    
-                    message += `${i+1}. ${statusEmoji} *${escapeMarkdown(acc.email)}*\n`;
-                    message += `   ├ Status: ${acc.status}\n`;
-                    message += `   ├ Rules: ${acc.rules?.length || 0} total\n`;
-                    message += `   ├ Blocked: ${acc.blockedSenders?.length || 0}\n`;
-                    message += `   ├ Forward: ${acc.forwardRules?.length || 0}\n`;
-                    message += `   ├ Checks: ${acc.ruleStats?.enforceCount || acc.stats?.rulesEnforced || 0}\n`;
-                    message += `   └ Last: ${lastCheck}\n\n`;
-                }
-
-                if (message.length > 4000) {
-                    const chunks = message.match(/[\s\S]{1,4000}/g) || [];
-                    for (const chunk of chunks) {
-                        await safeSendMessage(this.bot, chatId, chunk, { parse_mode: 'Markdown' });
-                    }
-                } else {
-                    await safeSendMessage(this.bot, chatId, message, { parse_mode: 'Markdown' });
-                }
-
-            } catch (error) {
-                this.bot.sendMessage(chatId, `❌ Error: ${error.message}`);
-            }
+                const data = query.data || '';
+                if (!data.startsWith('list_page_')) return;
+                const page = Math.max(1, parseInt(data.replace('list_page_', ''), 10));
+                const chatId = query.message.chat.id;
+                const messageId = query.message.message_id;
+                await this.sendAccountsListPage(chatId, page, messageId);
+                await this.bot.answerCallbackQuery(query.id).catch(() => {});
+            } catch (e) {}
         });
 
         // ============= ACCOUNT DETAILS =============
@@ -438,6 +401,75 @@ class AccountCommands {
                 this.bot.sendMessage(chatId, `❌ Error: ${error.message}`);
             }
         });
+    }
+
+    async sendAccountsListPage(chatId, page = 1, editMessageId = null) {
+        try {
+            const PAGE_SIZE = 20;
+            const total = await Account.countDocuments({ telegramChatId: chatId.toString() });
+
+            if (total === 0) {
+                return safeSendMessage(this.bot, chatId,
+                    '📭 *Chưa có tài khoản nào*\nDùng lệnh \`/add\` hoặc \`/addall\` để thêm tài khoản Outlook.',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+
+            const totalPages = Math.ceil(total / PAGE_SIZE);
+            const currentPage = Math.min(Math.max(1, page), totalPages);
+            const skip = (currentPage - 1) * PAGE_SIZE;
+
+            const [accounts, activeCount] = await Promise.all([
+                Account.find({ telegramChatId: chatId.toString() })
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(PAGE_SIZE)
+                    .lean(),
+                Account.countDocuments({ telegramChatId: chatId.toString(), status: 'active' })
+            ]);
+
+            let message = `📊 *DANH SÁCH TÀI KHOẢN (Trang ${currentPage}/${totalPages})*\n`;
+            message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+            message += `📧 Tổng: *${total}* | 🟢 Active: *${activeCount}*\n`;
+            message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+            for (let i = 0; i < accounts.length; i++) {
+                const acc = accounts[i];
+                const idx = skip + i + 1;
+                let statusEmoji = '🟢';
+                if (acc.status === 'reconnect_needed') statusEmoji = '🔄';
+                if (acc.status === 'expired') statusEmoji = '⚠️';
+                if (acc.status === 'error') statusEmoji = '🔴';
+
+                const lastCheck = acc.lastChecked ? this.formatTimeAgo(acc.lastChecked) : 'Never';
+                message += `${idx}. ${statusEmoji} \`${escapeMarkdown(acc.email)}\` _(Last: ${lastCheck})_\n`;
+            }
+
+            const navRow = [];
+            if (currentPage > 1) {
+                navRow.push({ text: '⬅️ Trang trước', callback_data: `list_page_${currentPage - 1}` });
+            }
+            if (currentPage < totalPages) {
+                navRow.push({ text: 'Trang sau ➡️', callback_data: `list_page_${currentPage + 1}` });
+            }
+
+            const options = {
+                parse_mode: 'Markdown',
+                reply_markup: navRow.length > 0 ? { inline_keyboard: [navRow] } : undefined
+            };
+
+            if (editMessageId) {
+                await this.bot.editMessageText(message, {
+                    chat_id: chatId,
+                    message_id: editMessageId,
+                    ...options
+                }).catch(() => {});
+            } else {
+                await safeSendMessage(this.bot, chatId, message, options);
+            }
+        } catch (error) {
+            await safeSendMessage(this.bot, chatId, `❌ Error: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
+        }
     }
 
     formatTimeAgo(date) {
