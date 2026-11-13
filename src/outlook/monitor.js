@@ -747,7 +747,7 @@ class OutlookMonitor {
                         }
                         if (visaCardNum) {
                             cardLine = `💳 *Số thẻ (4 số cuối):* \`${visaCardNum}\` (${isVisaDeclined ? '❌ DECLINED' : '🟢 USED ONLINE/PHONE'})\n`;
-                            if (!isVisaDeclined && /was recently used/i.test(rawCombined)) {
+                            if (!isVisaDeclined && /was recently used online or over the phone/i.test(rawCombined)) {
                                 global.visaResultsCache = global.visaResultsCache || [];
                                 let entry = global.visaResultsCache.find(r => r.email === account.email);
                                 if (!entry) {

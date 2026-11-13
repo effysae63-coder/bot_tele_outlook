@@ -418,19 +418,13 @@ class OutlookTelegramBot {
             }
         }
 
-        const formatDateVN = (isoTime) => {
+        const formatDateUTC = (isoTime) => {
             if (!isoTime) return 'Chưa rõ ngày';
             const d = new Date(isoTime);
             if (isNaN(d.getTime())) return 'Chưa rõ ngày';
-            const parts = new Intl.DateTimeFormat('en-GB', {
-                timeZone: 'Asia/Ho_Chi_Minh',
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-            }).formatToParts(d);
-            const day = parts.find(p => p.type === 'day')?.value || '01';
-            const month = parts.find(p => p.type === 'month')?.value || '01';
-            const year = parts.find(p => p.type === 'year')?.value || '2026';
+            const day = String(d.getUTCDate()).padStart(2, '0');
+            const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const year = d.getUTCFullYear();
             return `${day}/${month}/${year}`;
         };
 
@@ -472,7 +466,7 @@ class OutlookTelegramBot {
                         neverDeclined: Boolean(c.neverDeclined),
                         time: c.time || null,
                         ts: isNaN(ts) ? 0 : ts,
-                        dateStr: formatDateVN(c.time)
+                        dateStr: formatDateUTC(c.time)
                     });
                 }
             }
@@ -612,7 +606,7 @@ class OutlookTelegramBot {
 
                                 if (isDeclined) {
                                     declinedSet.add(card);
-                                } else if (/was recently used/i.test(fullText)) {
+                                } else if (/was recently used online or over the phone/i.test(fullText)) {
                                     if (!usedCards.has(card)) {
                                         usedCards.set(card, {
                                             card,
