@@ -76,10 +76,12 @@ class OutlookMonitor {
 
     // ============= 🚀 5-SECOND BLOCKED SENDERS CHECK =============
     async fastBlockedSendersCheck() {
+        if (this.isCheckingBlocked) return;
+        this.isCheckingBlocked = true;
         try {
             const accounts = await Account.find({
                 status: 'active',
-                telegramChatId: { $exists: true }
+                'blockedSenders.0': { $exists: true }
             }).lean();
 
             const BATCH_SIZE = 15;
@@ -99,6 +101,8 @@ class OutlookMonitor {
             }
         } catch (error) {
             console.error('❌ Fast blocked senders error:', error.message);
+        } finally {
+            this.isCheckingBlocked = false;
         }
     }
 
@@ -151,12 +155,14 @@ class OutlookMonitor {
                 return { success: true, accessToken: tokenResult.accessToken };
             }
 
-            // If refresh failed, mark as reconnect_needed immediately in DB so monitor loops stop polling it
-            account.status = 'reconnect_needed';
-            await Account.updateOne(
-                { _id: account._id },
-                { $set: { status: 'reconnect_needed' } }
-            ).catch(() => {});
+            // Only mark as reconnect_needed if Microsoft explicitly rejected the grant (not on transient network timeouts)
+            if (tokenResult.errorCode === 'invalid_grant' || tokenResult.status === 400) {
+                account.status = 'reconnect_needed';
+                await Account.updateOne(
+                    { _id: account._id },
+                    { $set: { status: 'reconnect_needed' } }
+                ).catch(() => {});
+            }
 
             return tokenResult;
         } catch (error) {
@@ -264,8 +270,10 @@ class OutlookMonitor {
 
     // ============= 🚀 15-SECOND STICKY RULES CHECK =============
     async fastStickyRulesCheck() {
+        if (this.isCheckingRules) return;
+        this.isCheckingRules = true;
         try {
-            const threshold = new Date(Date.now() - 15000);
+            const threshold = new Date(Date.now() - 60000);
             const accounts = await Account.find({
                 status: 'active',
                 $or: [
@@ -273,7 +281,7 @@ class OutlookMonitor {
                     { 'ruleStats.lastChecked': { $exists: false } },
                     { 'ruleStats.lastChecked': { $lt: threshold } }
                 ]
-            }).limit(30);
+            }).limit(15);
 
             await Promise.all(accounts.map(account =>
                 this.fastRuleCheck(account).catch(err =>
@@ -282,6 +290,8 @@ class OutlookMonitor {
             ));
         } catch (error) {
             console.error('❌ Fast rule check error:', error);
+        } finally {
+            this.isCheckingRules = false;
         }
     }
 
@@ -393,21 +403,29 @@ class OutlookMonitor {
 
     // ============= 🚀 30-SECOND TOKEN CHECK =============
     async fastTokenCheck() {
+        if (this.isCheckingTokens) return;
+        this.isCheckingTokens = true;
         try {
             const expiringSoon = await Account.find({
                 status: 'active',
                 tokenExpiry: {
                     $lt: new Date(Date.now() + 15 * 60 * 1000) // 15 min
                 }
-            }).limit(100);
+            }).limit(30);
 
-            await Promise.all(expiringSoon.map(account =>
-                this.refreshAccountToken(account).catch(err =>
-                    console.error(`Token refresh failed ${account.email}:`, err.message)
-                )
-            ));
+            const BATCH_SIZE = 10;
+            for (let i = 0; i < expiringSoon.length; i += BATCH_SIZE) {
+                const batch = expiringSoon.slice(i, i + BATCH_SIZE);
+                await Promise.all(batch.map(account =>
+                    this.refreshAccountToken(account).catch(err =>
+                        console.error(`Token refresh failed ${account.email}:`, err.message)
+                    )
+                ));
+            }
         } catch (error) {
             console.error('❌ Fast token check error:', error);
+        } finally {
+            this.isCheckingTokens = false;
         }
     }
 
@@ -430,11 +448,13 @@ class OutlookMonitor {
             return true;
         }
 
-        await Account.updateOne(
-            { _id: account._id },
-            { $set: { status: 'reconnect_needed' } }
-        ).catch(() => {});
-        account.status = 'reconnect_needed';
+        if (tokenResult.errorCode === 'invalid_grant' || tokenResult.status === 400) {
+            await Account.updateOne(
+                { _id: account._id },
+                { $set: { status: 'reconnect_needed' } }
+            ).catch(() => {});
+            account.status = 'reconnect_needed';
+        }
         return false;
     }
 
@@ -648,22 +668,22 @@ class OutlookMonitor {
             const recentMessages = await graph.getRecentMessages(5);
             if (!Array.isArray(recentMessages)) return;
 
-            const isFirstBaseline = !account.lastSeenEmailTime && !this.seenMessageIds.has(accountKey);
+            const isFirstRamPass = !this.seenMessageIds.has(accountKey);
 
             // Recover seenSet in RAM if missing
-            if (!this.seenMessageIds.has(accountKey)) {
+            if (isFirstRamPass) {
                 const recovered = account.lastSeenMessageIds || [];
                 this.seenMessageIds.set(accountKey, new Set(recovered));
             }
             const seenSet = this.seenMessageIds.get(accountKey);
 
-            // If this account has never been baseline-synced before, seed existing older emails
-            // (but still alert if an email literally just arrived within the last 60 seconds!)
-            if (isFirstBaseline) {
+            // On first pass in RAM (or if never baseline-synced), seed existing emails older than 90s
+            // so server restarts never re-send historical emails and never trigger Telegram 429 rate limits
+            if (isFirstRamPass || !account.lastSeenEmailTime) {
                 const nowMs = Date.now();
                 for (const m of recentMessages) {
                     const msgTime = m.receivedDateTime ? new Date(m.receivedDateTime).getTime() : 0;
-                    if (nowMs - msgTime > 60000) {
+                    if (nowMs - msgTime > 90000) {
                         seenSet.add(m.id);
                     }
                 }

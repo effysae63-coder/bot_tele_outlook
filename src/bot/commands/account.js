@@ -65,10 +65,10 @@ class AccountCommands {
 
             await safeSendMessage(this.bot, chatId,
                 '📂 *THÊM HÀNG LOẠT TÀI KHOẢN OUTLOOK (/addall)*\n\n' +
-                'Vui lòng **gửi file `.txt`** chứa danh sách mail (hoặc dán trực tiếp các dòng tài khoản vào khung chat) theo định dạng:\n' +
+                'Vui lòng *gửi file `.txt`* chứa danh sách mail (hoặc dán trực tiếp các dòng tài khoản vào khung chat) theo định dạng:\n' +
                 '`email|password|refresh_token|client_id`\n' +
-                '*(hoặc `email|refresh_token`)*\n\n' +
-                '⚡ Hệ thống sẽ tự động lấy **Microsoft Graph Token** và nạp toàn bộ tài khoản cho bạn!',
+                '_(hoặc `email|refresh_token`)_\n\n' +
+                '⚡ Hệ thống sẽ tự động lấy *Microsoft Graph Token* và nạp toàn bộ tài khoản cho bạn!',
                 { parse_mode: 'Markdown' }
             );
         });
@@ -138,8 +138,7 @@ class AccountCommands {
 
             try {
                 const account = await Account.findOne({
-                    email: email.toLowerCase(),
-                    telegramChatId: chatId.toString()
+                    email: email.toLowerCase()
                 });
 
                 if (!account) {
@@ -206,9 +205,9 @@ class AccountCommands {
             const email = match?.[1];
 
             try {
-                let query = { telegramChatId: chatId.toString() };
+                let query = {};
                 if (email) {
-                    query.email = email.toLowerCase();
+                    query.email = email.toLowerCase().trim();
                 }
 
                 const accounts = email 
@@ -294,8 +293,7 @@ class AccountCommands {
 
             try {
                 const account = await Account.findOne({
-                    email: email.toLowerCase(),
-                    telegramChatId: chatId.toString()
+                    email: email.toLowerCase()
                 });
 
                 if (!account) {
@@ -326,13 +324,10 @@ class AccountCommands {
         // ============= RECONNECT ACCOUNT =============
         this.bot.onText(/\/reconnect\s+(.+)/, async (msg, match) => {
             const chatId = msg.chat.id;
-            const email = match[1].toLowerCase();
+            const email = match[1].trim().toLowerCase();
 
             try {
-                const account = await Account.findOne({
-                    email,
-                    telegramChatId: chatId.toString()
-                });
+                const account = await Account.findOne({ email });
 
                 if (!account) {
                     return this.bot.sendMessage(chatId,
@@ -406,11 +401,11 @@ class AccountCommands {
     async sendAccountsListPage(chatId, page = 1, editMessageId = null) {
         try {
             const PAGE_SIZE = 20;
-            const total = await Account.countDocuments({ telegramChatId: chatId.toString() });
+            const total = await Account.countDocuments({});
 
             if (total === 0) {
                 return safeSendMessage(this.bot, chatId,
-                    '📭 *Chưa có tài khoản nào*\nDùng lệnh \`/add\` hoặc \`/addall\` để thêm tài khoản Outlook.',
+                    '📭 *Chưa có tài khoản nào*\nDùng lệnh `/add` hoặc `/addall` để thêm tài khoản Outlook.',
                     { parse_mode: 'Markdown' }
                 );
             }
@@ -420,12 +415,12 @@ class AccountCommands {
             const skip = (currentPage - 1) * PAGE_SIZE;
 
             const [accounts, activeCount] = await Promise.all([
-                Account.find({ telegramChatId: chatId.toString() })
+                Account.find({})
                     .sort({ createdAt: -1 })
                     .skip(skip)
                     .limit(PAGE_SIZE)
                     .lean(),
-                Account.countDocuments({ telegramChatId: chatId.toString(), status: 'active' })
+                Account.countDocuments({ status: 'active' })
             ]);
 
             let message = `📊 *DANH SÁCH TÀI KHOẢN (Trang ${currentPage}/${totalPages})*\n`;

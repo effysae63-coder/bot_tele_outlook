@@ -26,12 +26,13 @@ function escapeHtml(text) {
 }
 
 let telegramRateLimitedUntil = 0;
+let lastSendTimestamp = 0;
 
 /**
  * Safely send a message using the Telegram bot instance.
  * Automatically catches Telegram 400 'can\'t parse entities' errors
  * and falls back to plain text to ensure notifications are never lost.
- * Gracefully respects Telegram 429 rate limits to prevent spamming.
+ * Gracefully respects Telegram 429 rate limits and paces bursts.
  * 
  * @param {object} bot TelegramBot instance
  * @param {string|number} chatId 
@@ -42,10 +43,23 @@ let telegramRateLimitedUntil = 0;
 async function safeSendMessage(bot, chatId, text, options = {}) {
     if (!bot || !chatId || !text) return null;
 
-    // Check if bot is currently in a 429 rate-limit cooldown
-    if (Date.now() < telegramRateLimitedUntil) {
-        return null;
+    // If in a short 429 rate-limit window, wait it out up to 8s instead of silently dropping command replies
+    const now = Date.now();
+    if (now < telegramRateLimitedUntil) {
+        const waitMs = telegramRateLimitedUntil - now;
+        if (waitMs <= 8000) {
+            await new Promise(r => setTimeout(r, waitMs));
+        } else {
+            return null;
+        }
     }
+
+    // Light burst pacing (min 80ms between sends) to prevent triggering Telegram 429
+    const sinceLast = Date.now() - lastSendTimestamp;
+    if (sinceLast < 80) {
+        await new Promise(r => setTimeout(r, 80 - sinceLast));
+    }
+    lastSendTimestamp = Date.now();
 
     try {
         return await bot.sendMessage(chatId, text, options);
@@ -55,9 +69,15 @@ async function safeSendMessage(bot, chatId, text, options = {}) {
 
         // Handle Telegram 429 Too Many Requests
         if (error.response?.statusCode === 429 || errMsg.includes('429') || desc.includes('Too Many Requests')) {
-            const retryAfter = error.response?.body?.parameters?.retry_after || 60;
+            const retryAfter = error.response?.body?.parameters?.retry_after || 10;
             telegramRateLimitedUntil = Date.now() + (retryAfter * 1000);
             console.warn(`⏳ Telegram 429 rate limit active. Cooling down for ${retryAfter}s.`);
+            if (retryAfter <= 10) {
+                await new Promise(r => setTimeout(r, retryAfter * 1000));
+                try {
+                    return await bot.sendMessage(chatId, text, options);
+                } catch (_) {}
+            }
             return null;
         }
 
@@ -65,7 +85,7 @@ async function safeSendMessage(bot, chatId, text, options = {}) {
         const isParseError = errMsg.includes("can't parse entities") || desc.includes("can't parse entities");
         if (isParseError && options.parse_mode) {
             console.warn(`⚠️ Telegram parse_mode (${options.parse_mode}) error: ${errMsg}. Retrying with plain text.`);
-            const plainText = text.replace(/[*_`\[\]]/g, '');
+            const plainText = text.replace(/[*_`\[\]\\]/g, '');
             const fallbackOptions = { ...options };
             delete fallbackOptions.parse_mode;
             try {

